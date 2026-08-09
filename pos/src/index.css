@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-canvas text-ink-600 font-sans select-none overscroll-none;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* The till is driven by fingers, not a mouse. */
+  button { touch-action: manipulation; }
+}
+
+@layer components {
+  .tile { @apply rounded-xl border border-line bg-white shadow-sm; }
+  .key { @apply rounded-xl font-semibold transition-transform active:scale-[.97]; }
+  .key-num { @apply bg-white border border-line text-navy-800 text-[22px] py-4; }
+  .key-primary { @apply bg-navy-700 text-white hover:bg-navy-800; }
+  .key-leaf { @apply bg-leaf-600 text-white hover:bg-leaf-700; }
+  .key-ghost { @apply bg-white border border-line text-ink-600 hover:bg-navy-50; }
+}
+
+@layer base {
+  /* Spinner arrows are a mouse affordance; the till is touch-driven. */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type='number'] { -moz-appearance: textfield; }
+}
+
+/* 58 mm thermal paper. Only #receipt reaches the printer. */
+@media print {
+  @page { size: 58mm auto; margin: 2mm; }
+  body * { visibility: hidden; }
+  #receipt, #receipt * { visibility: visible; }
+  #receipt { position: absolute; inset: 0 auto auto 0; width: 54mm; }
+}

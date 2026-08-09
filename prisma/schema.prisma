@@ -1,0 +1,1145 @@
+// ERP Control Spine — schema
+// Invariants: zero hard-delete (status transitions only), append-only audit,
+// every mutating action carries actorId + roleCode + versionHash.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── enums ────────────────────────────────────────────────────────────────────
+
+enum DocStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  EXECUTED
+  REVERSED
+  CANCELLED
+}
+
+enum RecordStatus {
+  DRAFT
+  ACTIVE
+  BLOCKED
+  ARCHIVED
+}
+
+enum AuthorityBand {
+  T0
+  T1
+  T2
+  T3
+  T4
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGE_REQUESTED
+  EXPIRED
+  CANCELLED
+}
+
+enum Decision {
+  APPROVE
+  REJECT
+  REQUEST_CHANGE
+  DELEGATE
+}
+
+enum SodStatus {
+  OPEN
+  MITIGATED
+  ACCEPTED
+  CLOSED
+}
+
+enum PartyKind {
+  CUSTOMER
+  VENDOR
+  BOTH
+}
+
+enum MatchResult {
+  MATCHED
+  QTY_EXCEPTION
+  PRICE_EXCEPTION
+  MISSING_RECEIPT
+  DUPLICATE
+}
+
+enum PeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  LOCKED
+  REOPENED
+}
+
+// ─── tenancy ──────────────────────────────────────────────────────────────────
+
+/// Bagaimana tumpang-tindih peran diperlakukan. Usaha 8 orang tidak bisa
+/// memisahkan 51 peran; yang bisa dipisahkan adalah LANGKAH dalam satu dokumen.
+enum SodPolicy {
+  STRICT // peran bertabrakan ditolak — perusahaan besar
+  SMALL_BUSINESS // diterima dengan mitigasi tertulis + review pemilik
+}
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+/// One paying customer: a warung, cafe, restaurant group or SME.
+model Tenant {
+  id          String              @id @default(cuid())
+  slug        String              @unique // subdomain: warungbudi.erp.id
+  name        String
+  status      TenantStatus        @default(TRIAL)
+  plan        String              @default("STARTER")
+  sodPolicy   SodPolicy           @default(SMALL_BUSINESS)
+  locale      String              @default("id-ID")
+  timezone    String              @default("Asia/Jakarta")
+  currency    String              @default("IDR")
+  /// Hard limits enforced at provisioning and on create.
+  maxUsers    Int                 @default(10)
+  maxSites    Int                 @default(2)
+  trialEndsAt DateTime?
+  suspendedAt DateTime?
+  createdBy   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  calibration TenantCalibration[]
+
+  @@index([status])
+}
+
+/// Per-tenant T0–T4 calibration. The code sheet is only the seed template.
+model TenantCalibration {
+  id            String    @id @default(cuid())
+  tenantId      String    @default("")
+  version       String
+  hash          String
+  /// Full calibration sheet: anchor, ladders, percent, class/legal floors, sites.
+  sheet         Json
+  effectiveFrom DateTime  @default(now())
+  supersededAt  DateTime?
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, version])
+  @@index([tenantId, supersededAt])
+}
+
+// ─── infrastructure ───────────────────────────────────────────────────────────
+
+model DocSequence {
+  key      String
+  tenantId String @default("")
+  value    Int    @default(0)
+
+  @@id([tenantId, key])
+  @@index([tenantId])
+}
+
+// ─── org + identity (MD01–MD05) ───────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("")
+  code      String // MD01 company_code
+  name      String
+  currency  String   @default("IDR")
+  createdAt DateTime @default(now())
+  sites     Site[]
+  periods   Period[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model Site {
+  id        String   @id @default(cuid())
+  tenantId  String   @default("")
+  companyId String
+  code      String // MD03 location_code
+  name      String
+  isPos     Boolean  @default(false)
+  /// Titik absensi. Radius dalam meter; di luar itu absen ditandai, bukan ditolak.
+  lat       Decimal? @db.Decimal(9, 6)
+  lng       Decimal? @db.Decimal(9, 6)
+  geofenceM Int      @default(150)
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([tenantId])
+}
+
+model User {
+  id              String       @id @default(cuid())
+  tenantId        String       @default("")
+  subjectId       String // MD04 login_or_subject_id
+  displayName     String
+  email           String?
+  employeeNo      String? // MD06
+  department      String?
+  status          RecordStatus @default(ACTIVE)
+  /// Joiner-Mover-Leaver evidence. K48 = accessRevokedAt − terminatedAt.
+  joinedAt        DateTime?
+  terminatedAt    DateTime?
+  accessRevokedAt DateTime?
+  createdAt       DateTime     @default(now())
+  roles           UserRole[]
+  credential      Credential?
+  sessions        Session[]
+
+  @@unique([tenantId, subjectId])
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model Credential {
+  userId      String    @id
+  hash        String
+  salt        String
+  algo        String    @default("scrypt")
+  mustChange  Boolean   @default(true)
+  failedCount Int       @default(0)
+  lockedUntil DateTime?
+  rotatedAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  tenantId  String    @default("")
+  userId    String
+  tokenHash String    @unique
+  issuedAt  DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  ip        String?
+  userAgent String?
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, revokedAt])
+  @@index([tenantId])
+}
+
+/// Business roles R01–R51. Permissions are attached to roles, never to users.
+model Role {
+  id          String        @id @default(cuid())
+  code        String        @unique // R01..R51
+  name        String
+  band        AuthorityBand @default(T0) // max band this role may decide at
+  privileged  Boolean       @default(false)
+  status      RecordStatus  @default(ACTIVE)
+  assignments UserRole[]
+}
+
+model UserRole {
+  id         String    @id @default(cuid())
+  tenantId   String    @default("")
+  userId     String
+  roleId     String
+  companyId  String?
+  siteId     String?
+  validFrom  DateTime  @default(now())
+  validTo    DateTime?
+  grantedBy  String
+  approvalId String?
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id])
+  role       Role      @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId, companyId, siteId])
+  @@index([roleId])
+  @@index([tenantId])
+}
+
+// ─── master data ──────────────────────────────────────────────────────────────
+
+/// MD09 customer / MD10 vendor
+model Party {
+  id           String        @id @default(cuid())
+  tenantId     String        @default("")
+  code         String
+  kind         PartyKind
+  legalName    String
+  taxId        String?
+  creditLimit  Decimal       @default(0) @db.Decimal(18, 2)
+  paymentTerm  String? // MD16
+  restricted   Boolean       @default(false)
+  status       RecordStatus  @default(DRAFT)
+  versionHash  String
+  createdBy    String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  bankAccounts BankAccount[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// MD20 — PAN never stored in clear; token + masked display only.
+model BankAccount {
+  id            String       @id @default(cuid())
+  tenantId      String       @default("")
+  partyId       String
+  bankCode      String
+  accountToken  String
+  accountMasked String
+  holderName    String
+  currency      String       @default("IDR")
+  status        RecordStatus @default(DRAFT)
+  effectiveFrom DateTime?
+  supersededBy  String?
+  createdBy     String
+  verifiedBy    String? // independent callback proof (SOD01)
+  verifiedAt    DateTime?
+  approvalId    String?
+  versionHash   String
+  createdAt     DateTime     @default(now())
+  party         Party        @relation(fields: [partyId], references: [id])
+
+  @@unique([tenantId, accountToken])
+  @@index([partyId, status])
+  @@index([tenantId])
+}
+
+/// MD13 unit of measure
+model Uom {
+  id       String    @id @default(cuid())
+  tenantId String    @default("")
+  code     String
+  name     String
+  category String
+  factor   Decimal   @default(1) @db.Decimal(18, 6)
+  products Product[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// MD12 product / service
+model Product {
+  id                String       @id @default(cuid())
+  tenantId          String       @default("")
+  code              String
+  name              String
+  kind              String       @default("GOODS") // GOODS | SERVICE | RECURRING
+  category          String
+  uomId             String
+  stdCost           Decimal      @default(0) @db.Decimal(18, 4)
+  listPrice         Decimal      @default(0) @db.Decimal(18, 4)
+  taxCode           String? // MD15
+  /// Ketersediaan dikuasai dapur (daftar 86). Kasir hanya membaca.
+  available         Boolean      @default(true)
+  unavailableReason String?
+  unavailableAt     DateTime?
+  unavailableBy     String?
+  station           String? // PANAS | DINGIN | BAR | DESSERT
+  prepMinutes       Int          @default(10)
+  status            RecordStatus @default(DRAFT)
+  versionHash       String
+  uom               Uom          @relation(fields: [uomId], references: [id])
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// MD18 chart of accounts / journal
+model Account {
+  id          String        @id @default(cuid())
+  tenantId    String        @default("")
+  code        String
+  name        String
+  type        String // ASSET|LIABILITY|EQUITY|INCOME|EXPENSE
+  journalCode String?
+  restricted  Boolean       @default(false)
+  status      RecordStatus  @default(ACTIVE)
+  lines       JournalLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+// ─── approval + audit spine ───────────────────────────────────────────────────
+
+model ApprovalRequest {
+  id                 String             @id @default(cuid())
+  tenantId           String             @default("")
+  familyCode         String // AR01..AR28
+  band               AuthorityBand
+  requiredCount      Int                @default(1)
+  docType            String
+  docId              String
+  companyId          String?
+  amount             Decimal?           @db.Decimal(18, 2)
+  currency           String?
+  payload            Json
+  versionHash        String
+  /// Which calibration produced this band — routing must stay reproducible.
+  calibrationVersion String?
+  calibrationHash    String?
+  bandDrivers        String[]           @default([])
+  status             ApprovalStatus     @default(PENDING)
+  makerId            String
+  makerRole          String
+  dueAt              DateTime?
+  closedAt           DateTime?
+  createdAt          DateTime           @default(now())
+  decisions          ApprovalDecision[]
+
+  @@index([docType, docId])
+  @@index([status, band])
+  @@index([tenantId])
+}
+
+model ApprovalDecision {
+  id          String          @id @default(cuid())
+  tenantId    String          @default("")
+  requestId   String
+  actorId     String
+  roleCode    String
+  band        AuthorityBand
+  decision    Decision
+  reasonCode  String
+  reason      String?
+  versionHash String
+  delegateTo  String?
+  decidedAt   DateTime        @default(now())
+  request     ApprovalRequest @relation(fields: [requestId], references: [id])
+
+  @@unique([requestId, actorId, versionHash])
+  @@index([actorId])
+  @@index([tenantId])
+}
+
+/// Append-only. No update, no delete.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("")
+  at          DateTime @default(now())
+  actorId     String
+  roleCode    String?
+  action      String // e.g. "so.submit", "payment.release"
+  docType     String
+  docId       String
+  fromStatus  String?
+  toStatus    String?
+  reasonCode  String?
+  versionHash String?
+  sodRuleIds  String[] @default([])
+  meta        Json?
+
+  @@index([docType, docId, at])
+  @@index([actorId, at])
+  @@index([tenantId])
+}
+
+model SodConflict {
+  id         String    @id @default(cuid())
+  tenantId   String    @default("")
+  ruleId     String // SOD01..SOD14
+  scope      String // "STATIC" | "DYNAMIC"
+  subjectId  String // userId or docId
+  detail     Json
+  status     SodStatus @default(OPEN)
+  mitigation String?
+  approvedBy String?
+  detectedAt DateTime  @default(now())
+  closedAt   DateTime?
+
+  @@index([status, ruleId])
+  @@index([tenantId])
+}
+
+// ─── O2C / POS ────────────────────────────────────────────────────────────────
+
+model SalesOrder {
+  id          String           @id @default(cuid())
+  tenantId    String           @default("")
+  docNo       String
+  companyId   String
+  siteId      String?
+  partyId     String
+  channel     String           @default("SALES") // SALES | POS | SUBSCRIPTION
+  currency    String           @default("IDR")
+  subtotal    Decimal          @default(0) @db.Decimal(18, 2)
+  discount    Decimal          @default(0) @db.Decimal(18, 2)
+  tax         Decimal          @default(0) @db.Decimal(18, 2)
+  total       Decimal          @default(0) @db.Decimal(18, 2)
+  marginPct   Decimal          @default(0) @db.Decimal(9, 4)
+  status      DocStatus        @default(DRAFT)
+  stage       String           @default("ORDER") // ORDER|RESERVED|DELIVERED|BILLED|SETTLED
+  reservedAt  DateTime?
+  deliveredAt DateTime?
+  podRef      String?
+  promisedAt  DateTime?
+  billedAt    DateTime?
+  settledAt   DateTime?
+  planRef     String?
+  versionHash String
+  createdBy   String
+  createdAt   DateTime         @default(now())
+  lines       SalesOrderLine[]
+  invoices    Invoice[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model SalesOrderLine {
+  id         String     @id @default(cuid())
+  tenantId   String     @default("")
+  orderId    String
+  productId  String
+  qty        Decimal    @db.Decimal(18, 4)
+  qtyShipped Decimal    @default(0) @db.Decimal(18, 4)
+  unitPrice  Decimal    @db.Decimal(18, 4)
+  unitCost   Decimal    @default(0) @db.Decimal(18, 4)
+  discPct    Decimal    @default(0) @db.Decimal(9, 4)
+  taxAmount  Decimal    @default(0) @db.Decimal(18, 2)
+  order      SalesOrder @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([tenantId])
+}
+
+model Invoice {
+  id          String      @id @default(cuid())
+  tenantId    String      @default("")
+  docNo       String
+  orderId     String?
+  partyId     String
+  companyId   String
+  issuedAt    DateTime?
+  dueAt       DateTime?
+  total       Decimal     @db.Decimal(18, 2)
+  settled     Decimal     @default(0) @db.Decimal(18, 2)
+  status      DocStatus   @default(DRAFT)
+  versionHash String
+  createdBy   String
+  createdAt   DateTime    @default(now())
+  order       SalesOrder? @relation(fields: [orderId], references: [id])
+
+  @@unique([tenantId, docNo])
+  @@index([partyId, status])
+  @@index([tenantId])
+}
+
+model PosSession {
+  id           String     @id @default(cuid())
+  tenantId     String     @default("")
+  /// Idempotency key minted by the till when the shift is opened offline.
+  clientRef    String?
+  siteId       String
+  companyId    String
+  openedBy     String
+  openedAt     DateTime   @default(now())
+  closedBy     String?
+  closedAt     DateTime?
+  openingFloat Decimal    @default(0) @db.Decimal(18, 2)
+  expectedCash Decimal    @default(0) @db.Decimal(18, 2)
+  countedCash  Decimal    @default(0) @db.Decimal(18, 2)
+  variance     Decimal    @default(0) @db.Decimal(18, 2)
+  status       DocStatus  @default(DRAFT)
+  approvalId   String?
+  versionHash  String
+  orders       PosOrder[]
+
+  @@unique([tenantId, clientRef])
+  @@index([tenantId])
+}
+
+model PosOrder {
+  id         String         @id @default(cuid())
+  tenantId   String         @default("")
+  /// Idempotency key minted offline by the till. Re-sending never duplicates.
+  clientRef  String?
+  sessionId  String
+  docNo      String
+  total      Decimal        @db.Decimal(18, 2)
+  tenderType String // CASH | CARD | QRIS | EWALLET
+  gatewayRef String?
+  orderType  String         @default("DINE_IN") // DINE_IN | TAKEAWAY | DELIVERY
+  /// Perjalanan tiket di dapur. Terpisah dari status dokumen keuangan.
+  prepStatus String         @default("BARU") // BARU | DIMASAK | SIAP | DIANTAR
+  readyAt    DateTime?
+  servedAt   DateTime?
+  tableNo    String?
+  cashierRef String? // employeeNo of the operator
+  /// Void/refund trail. Nothing is deleted; a reversal is its own order.
+  voidedAt   DateTime?
+  voidReason String?
+  voidOfRef  String? // clientRef of the order being reversed
+  status     DocStatus      @default(EXECUTED)
+  createdBy  String
+  createdAt  DateTime       @default(now())
+  session    PosSession     @relation(fields: [sessionId], references: [id])
+  lines      PosOrderLine[]
+
+  @@unique([tenantId, docNo])
+  @@unique([tenantId, clientRef])
+  @@index([sessionId])
+  @@index([tenantId])
+}
+
+model PosOrderLine {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("")
+  orderId     String
+  productCode String
+  name        String
+  qty         Decimal   @db.Decimal(18, 3)
+  unitPrice   Decimal   @db.Decimal(18, 2)
+  note        String?
+  station     String?
+  readyAt     DateTime?
+  order       PosOrder  @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId, orderId])
+}
+
+/// Gateway settlement lines matched against PosOrder.gatewayRef
+model GatewaySettlement {
+  id                String   @id @default(cuid())
+  tenantId          String   @default("")
+  gateway           String
+  batchRef          String
+  gatewayRef        String
+  grossAmount       Decimal  @db.Decimal(18, 2)
+  feeAmount         Decimal  @default(0) @db.Decimal(18, 2)
+  netAmount         Decimal  @db.Decimal(18, 2)
+  settledAt         DateTime
+  matchedPosOrderId String?
+  matchResult       String   @default("UNMATCHED")
+
+  @@unique([tenantId, gateway, gatewayRef])
+  @@index([tenantId])
+}
+
+model Subscription {
+  id           String    @id @default(cuid())
+  tenantId     String    @default("")
+  partyId      String
+  productId    String
+  companyId    String
+  periodMonths Int       @default(1)
+  amount       Decimal   @db.Decimal(18, 2)
+  startedAt    DateTime
+  nextBillAt   DateTime
+  cancelledAt  DateTime?
+  status       DocStatus @default(APPROVED)
+  versionHash  String
+
+  @@index([tenantId])
+}
+
+// ─── P2P ──────────────────────────────────────────────────────────────────────
+
+model Requisition {
+  id          String            @id @default(cuid())
+  tenantId    String            @default("")
+  docNo       String
+  companyId   String
+  requesterId String
+  costCenter  String? // MD19
+  budgetRef   String?
+  total       Decimal           @db.Decimal(18, 2)
+  urgency     String            @default("NORMAL")
+  status      DocStatus         @default(DRAFT)
+  versionHash String
+  createdAt   DateTime          @default(now())
+  lines       RequisitionLine[]
+  orders      PurchaseOrder[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model RequisitionLine {
+  id            String      @id @default(cuid())
+  tenantId      String      @default("")
+  requisitionId String
+  productId     String
+  qty           Decimal     @db.Decimal(18, 4)
+  estUnitPrice  Decimal     @db.Decimal(18, 4)
+  requisition   Requisition @relation(fields: [requisitionId], references: [id])
+
+  @@index([tenantId])
+}
+
+model PurchaseOrder {
+  id            String              @id @default(cuid())
+  tenantId      String              @default("")
+  docNo         String
+  companyId     String
+  vendorId      String
+  requisitionId String?
+  currency      String              @default("IDR")
+  total         Decimal             @db.Decimal(18, 2)
+  status        DocStatus           @default(DRAFT)
+  buyerId       String
+  approvalId    String?
+  promisedAt    DateTime?
+  versionHash   String
+  createdAt     DateTime            @default(now())
+  requisition   Requisition?        @relation(fields: [requisitionId], references: [id])
+  lines         PurchaseOrderLine[]
+  receipts      GoodsReceipt[]
+  bills         VendorBill[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model PurchaseOrderLine {
+  id          String        @id @default(cuid())
+  tenantId    String        @default("")
+  poId        String
+  productId   String
+  qty         Decimal       @db.Decimal(18, 4)
+  qtyReceived Decimal       @default(0) @db.Decimal(18, 4)
+  qtyBilled   Decimal       @default(0) @db.Decimal(18, 4)
+  unitPrice   Decimal       @db.Decimal(18, 4)
+  po          PurchaseOrder @relation(fields: [poId], references: [id])
+
+  @@index([poId])
+  @@index([tenantId])
+}
+
+model GoodsReceipt {
+  id          String             @id @default(cuid())
+  tenantId    String             @default("")
+  docNo       String
+  poId        String
+  siteId      String
+  receivedBy  String
+  receivedAt  DateTime           @default(now())
+  availableAt DateTime? // dock-to-stock (K20)
+  status      DocStatus          @default(DRAFT)
+  versionHash String
+  po          PurchaseOrder      @relation(fields: [poId], references: [id])
+  lines       GoodsReceiptLine[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model GoodsReceiptLine {
+  id          String       @id @default(cuid())
+  tenantId    String       @default("")
+  receiptId   String
+  poLineId    String
+  qtyAccepted Decimal      @db.Decimal(18, 4)
+  qtyRejected Decimal      @default(0) @db.Decimal(18, 4)
+  lotRef      String?
+  receipt     GoodsReceipt @relation(fields: [receiptId], references: [id])
+
+  @@index([tenantId])
+}
+
+model VendorBill {
+  id             String           @id @default(cuid())
+  tenantId       String           @default("")
+  docNo          String
+  poId           String?
+  vendorId       String
+  companyId      String
+  billDate       DateTime
+  dueAt          DateTime?
+  total          Decimal          @db.Decimal(18, 2)
+  matchResult    MatchResult?
+  matchedAt      DateTime?
+  firstPassMatch Boolean          @default(false) // K17
+  status         DocStatus        @default(DRAFT)
+  preparedBy     String
+  versionHash    String
+  createdAt      DateTime         @default(now())
+  po             PurchaseOrder?   @relation(fields: [poId], references: [id])
+  lines          VendorBillLine[]
+  paymentItems   PaymentItem[]
+
+  @@unique([vendorId, docNo])
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model VendorBillLine {
+  id        String     @id @default(cuid())
+  tenantId  String     @default("")
+  billId    String
+  poLineId  String?
+  productId String
+  qty       Decimal    @db.Decimal(18, 4)
+  unitPrice Decimal    @db.Decimal(18, 4)
+  bill      VendorBill @relation(fields: [billId], references: [id])
+
+  @@index([tenantId])
+}
+
+model PaymentBatch {
+  id           String        @id @default(cuid())
+  tenantId     String        @default("")
+  docNo        String
+  companyId    String
+  currency     String        @default("IDR")
+  total        Decimal       @db.Decimal(18, 2)
+  status       DocStatus     @default(DRAFT)
+  preparedBy   String // SOD08: != approvers/releaser
+  approvalId   String?
+  releasedBy   String?
+  releasedAt   DateTime?
+  bankRef      String?
+  reconciledAt DateTime?
+  versionHash  String
+  createdAt    DateTime      @default(now())
+  items        PaymentItem[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model PaymentItem {
+  id            String       @id @default(cuid())
+  tenantId      String       @default("")
+  batchId       String
+  billId        String
+  amount        Decimal      @db.Decimal(18, 2)
+  bankAccountId String
+  batch         PaymentBatch @relation(fields: [batchId], references: [id])
+  bill          VendorBill   @relation(fields: [billId], references: [id])
+
+  @@unique([batchId, billId])
+  @@index([tenantId])
+}
+
+// ─── R2R ──────────────────────────────────────────────────────────────────────
+
+model Period {
+  id               String       @id @default(cuid())
+  tenantId         String       @default("")
+  companyId        String
+  year             Int
+  month            Int
+  status           PeriodStatus @default(OPEN)
+  lockedBy         String?
+  lockedAt         DateTime?
+  reopenApprovalId String?
+  reopenedBy       String?
+  reopenedAt       DateTime?
+  company          Company      @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, year, month])
+  @@index([tenantId])
+}
+
+model JournalEntry {
+  id            String        @id @default(cuid())
+  tenantId      String        @default("")
+  docNo         String
+  companyId     String
+  periodId      String
+  journalCode   String
+  postingDate   DateTime
+  source        String        @default("MANUAL") // MANUAL | SUBLEDGER
+  sourceDocType String?
+  sourceDocId   String?
+  memo          String?
+  status        DocStatus     @default(DRAFT)
+  preparedBy    String // SOD07: != approver/poster
+  approvalId    String?
+  postedBy      String?
+  postedAt      DateTime?
+  reversalOfId  String?
+  versionHash   String
+  createdAt     DateTime      @default(now())
+  lines         JournalLine[]
+
+  @@unique([tenantId, docNo])
+  @@index([periodId, status])
+  @@index([tenantId])
+}
+
+model JournalLine {
+  id        String       @id @default(cuid())
+  tenantId  String       @default("")
+  entryId   String
+  accountId String
+  debit     Decimal      @default(0) @db.Decimal(18, 2)
+  credit    Decimal      @default(0) @db.Decimal(18, 2)
+  dimension String?
+  entry     JournalEntry @relation(fields: [entryId], references: [id])
+  account   Account      @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([tenantId])
+}
+
+model BankStatementLine {
+  id           String    @id @default(cuid())
+  tenantId     String    @default("")
+  companyId    String
+  bankRef      String
+  valueDate    DateTime
+  amount       Decimal   @db.Decimal(18, 2)
+  description  String?
+  matchedType  String?
+  matchedId    String?
+  reconciledAt DateTime?
+
+  @@unique([companyId, bankRef])
+  @@index([tenantId])
+}
+
+// ─── payroll (SOD09 / K47) ────────────────────────────────────────────────────
+
+model PayrollRun {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("")
+  docNo       String
+  companyId   String
+  periodId    String
+  grossTotal  Decimal   @db.Decimal(18, 2)
+  netTotal    Decimal   @db.Decimal(18, 2)
+  headcount   Int
+  status      DocStatus @default(DRAFT)
+  runBy       String // SOD09: != approver/payer
+  approvalId  String?
+  paidBy      String?
+  paidAt      DateTime?
+  versionHash String
+  createdAt   DateTime  @default(now())
+  payslips    Payslip[]
+
+  @@unique([tenantId, docNo])
+  @@index([tenantId])
+}
+
+model Payslip {
+  id         String     @id @default(cuid())
+  tenantId   String     @default("")
+  runId      String
+  employeeNo String
+  gross      Decimal    @db.Decimal(18, 2)
+  net        Decimal    @db.Decimal(18, 2)
+  corrected  Boolean    @default(false) // K47
+  run        PayrollRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, employeeNo])
+  @@index([tenantId])
+}
+
+// ─── KPI semantic layer (MD33) ────────────────────────────────────────────────
+
+model KpiPlan {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("")
+  kpiCode     String
+  companyId   String
+  periodStart DateTime
+  periodEnd   DateTime
+  target      Decimal  @db.Decimal(18, 6)
+  approvedBy  String?
+
+  @@unique([kpiCode, companyId, periodStart, periodEnd])
+  @@index([tenantId])
+}
+
+model KpiSnapshot {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("")
+  kpiCode     String // K01..K66
+  defVersion  String
+  companyId   String
+  periodStart DateTime
+  periodEnd   DateTime
+  value       Decimal?  @db.Decimal(18, 6)
+  numerator   Decimal?  @db.Decimal(18, 4)
+  denominator Decimal?  @db.Decimal(18, 4)
+  target      Decimal?  @db.Decimal(18, 6)
+  lineage     Json // { formula, sources[], filters, inputHash }
+  computedAt  DateTime  @default(now())
+  certifiedBy String?
+  certifiedAt DateTime?
+
+  @@unique([kpiCode, companyId, periodStart, periodEnd, defVersion])
+  @@index([companyId, computedAt])
+  @@index([tenantId])
+}
+
+// ─── HRIS — the tenant's own workforce (MD06–MD08) ───────────────────────────
+
+enum EmploymentStatus {
+  PROBATION
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  RESIGNED
+  TERMINATED
+}
+
+enum ContractType {
+  PKWT // fixed term
+  PKWTT // permanent
+  DAILY // harian lepas
+  INTERN
+}
+
+enum LeaveStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model Employee {
+  id          String               @id @default(cuid())
+  tenantId    String               @default("")
+  employeeNo  String // MD06
+  fullName    String
+  nik         String? // KTP, stored for payroll/BPJS only
+  npwp        String?
+  email       String?
+  phone       String?
+  position    String? // MD07
+  department  String?
+  siteId      String?
+  managerId   String?
+  hiredAt     DateTime
+  status      EmploymentStatus     @default(PROBATION)
+  /// Links the person to their login, when they have one. Not every waiter does.
+  userId      String?
+  bankName    String?
+  bankAccount String? // tokenised on write, never raw
+  /// SHA-256 of tenant+employeeNo+PIN. Cached by the till so login works offline.
+  posPinHash  String?
+  posPinSalt  String?
+  bpjsTk      String?
+  bpjsKes     String?
+  exitedAt    DateTime?
+  exitReason  String?
+  versionHash String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  contracts   EmploymentContract[]
+  attendances Attendance[]
+  leaves      LeaveRequest[]
+  shifts      ShiftAssignment[]
+
+  @@unique([tenantId, employeeNo])
+  @@index([tenantId, status])
+  @@index([tenantId, siteId])
+}
+
+model EmploymentContract {
+  id              String       @id @default(cuid())
+  tenantId        String       @default("")
+  employeeId      String
+  type            ContractType
+  startsAt        DateTime
+  endsAt          DateTime? // null for PKWTT
+  probationEndsAt DateTime?
+  baseSalary      Decimal      @db.Decimal(18, 2)
+  allowances      Json? // { makan: 25000, transport: 20000 }
+  workHours       Int          @default(40) // per week
+  status          DocStatus    @default(DRAFT)
+  approvalId      String?
+  signedAt        DateTime?
+  versionHash     String
+  createdAt       DateTime     @default(now())
+  employee        Employee     @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId, employeeId])
+  @@index([tenantId, endsAt])
+}
+
+/// Shift plan per outlet. The roster the manager publishes each week.
+model ShiftAssignment {
+  id          String    @id @default(cuid())
+  tenantId    String    @default("")
+  employeeId  String
+  siteId      String
+  shiftDate   DateTime  @db.Date
+  startsAt    DateTime
+  endsAt      DateTime
+  role        String? // kasir, waiter, kitchen
+  publishedAt DateTime?
+  swappedWith String?
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+
+  @@unique([tenantId, employeeId, shiftDate, startsAt])
+  @@index([tenantId, siteId, shiftDate])
+}
+
+model Attendance {
+  id              String    @id @default(cuid())
+  tenantId        String    @default("")
+  employeeId      String
+  siteId          String
+  checkIn         DateTime
+  checkOut        DateTime?
+  /// Geofence evidence — outlet staff clock in on site, not from home.
+  checkInLat      Decimal?  @db.Decimal(9, 6)
+  checkInLng      Decimal?  @db.Decimal(9, 6)
+  /// Jarak dari titik outlet saat absen masuk, meter. Null = lokasi tidak dikirim.
+  distanceM       Int?
+  /// Ditandai bila di luar radius atau dikirim dari antrean offline.
+  /// Ditandai, bukan ditolak — GPS meleset adalah masalah upah, bukan kontrol.
+  flagged         Boolean   @default(false)
+  flagReason      String?
+  lateMinutes     Int       @default(0)
+  overtimeMinutes Int       @default(0)
+  source          String    @default("MOBILE") // MOBILE | POS | MANUAL
+  note            String?
+  employee        Employee  @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId, employeeId, checkIn])
+  @@index([tenantId, siteId, checkIn])
+}
+
+model LeaveType {
+  id        String  @id @default(cuid())
+  tenantId  String  @default("")
+  code      String // TAHUNAN, SAKIT, MELAHIRKAN, IZIN
+  name      String
+  quotaDays Int     @default(12)
+  paid      Boolean @default(true)
+
+  @@unique([tenantId, code])
+}
+
+model LeaveRequest {
+  id          String      @id @default(cuid())
+  tenantId    String      @default("")
+  employeeId  String
+  leaveTypeId String
+  startsAt    DateTime    @db.Date
+  endsAt      DateTime    @db.Date
+  days        Decimal     @db.Decimal(5, 2)
+  reason      String?
+  attachment  String?
+  status      LeaveStatus @default(DRAFT)
+  approvalId  String?
+  decidedBy   String?
+  decidedAt   DateTime?
+  versionHash String
+  createdAt   DateTime    @default(now())
+  employee    Employee    @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId, employeeId, startsAt])
+  @@index([tenantId, status])
+}

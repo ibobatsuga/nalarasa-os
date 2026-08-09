@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: erp_spine
+    ports: ['5432:5432']
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./backup:/backup
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U erp -d erp_spine']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Nightly dump into ./backup. Restore: psql < backup/<file>.sql
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      PGPASSWORD: erp
+    volumes:
+      - ./backup:/backup
+    entrypoint: >
+      sh -c 'while true; do
+        pg_dump -h db -U erp -d erp_spine --clean --if-exists
+          > /backup/erp_spine_$$(date +%Y%m%d_%H%M).sql;
+        ls -1t /backup/*.sql | tail -n +15 | xargs -r rm;
+        sleep 86400;
+      done'
+
+volumes:
+  dbdata:

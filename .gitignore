@@ -1,0 +1,16 @@
+# Rahasia. .env memuat BANK_TOKEN_SECRET dan kredensial basis data.
+.env
+.env.*
+!.env.example
+
+# Dependensi dan keluaran build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Basis data pengembangan (PGlite) — 44 MB data biner, bukan kode
+.pgdata/
+
+# Berkas sistem
+.DS_Store
+*.log

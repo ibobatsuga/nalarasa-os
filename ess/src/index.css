@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-canvas text-ink-600 font-sans text-[13.5px]; }
+  h1, h2, h3 { @apply text-navy-700 font-semibold; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { @apply bg-navy-100 rounded-full; }
+}
+
+@layer components {
+  /* One card definition. Every panel in the product uses it. */
+  .card { @apply bg-white border border-line rounded-card shadow-card; }
+  .card-pad { @apply p-5; }
+  .card-title { @apply text-[15px] font-semibold text-navy-700; }
+
+  .nav-group { @apply px-4 pt-5 pb-2 text-[10.5px] font-semibold tracking-[.08em] text-ink-400 uppercase; }
+  .nav-item { @apply flex items-center gap-3 mx-3 px-3 py-2 rounded-lg text-[13.5px] text-ink-600 transition-colors; }
+  .nav-item:hover { @apply bg-navy-50 text-navy-700; }
+  .nav-item-active { @apply bg-navy-700 text-white font-medium; }
+  .nav-item-active:hover { @apply bg-navy-700 text-white; }
+
+  .chip { @apply grid place-items-center w-9 h-9 rounded-lg bg-navy-50 text-navy-700; }
+  .delta-up { @apply text-leaf-600 font-medium; }
+  .delta-down { @apply text-brick-500 font-medium; }
+
+  .btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors; }
+  .btn-primary { @apply bg-navy-700 text-white hover:bg-navy-800; }
+  .btn-ghost { @apply text-ink-600 hover:bg-navy-50 hover:text-navy-700; }
+
+  .band { @apply px-2 py-0.5 rounded text-[11px] font-semibold; }
+  .band-T0 { @apply bg-slate-100 text-ink-600; }
+  .band-T1 { @apply bg-navy-50 text-navy-600; }
+  .band-T2 { @apply bg-leaf-100 text-leaf-700; }
+  .band-T3 { @apply bg-orange-100 text-amber-500; }
+  .band-T4 { @apply bg-red-100 text-brick-500; }
+}
+
+@layer base {
+  /* Aplikasi saku: satu kolom, tanpa geser mendatar, aman dari poni layar. */
+  body { @apply bg-canvas select-none overscroll-none; }
+  #root { max-width: 480px; margin: 0 auto; min-height: 100vh; }
+}
+
+@layer components {
+  .sheet { @apply bg-white rounded-2xl border border-line shadow-sm; }
+  .tap { @apply rounded-xl font-semibold transition-transform active:scale-[.98]; }
+  .tap-primary { @apply bg-navy-700 text-white; }
+  .tap-leaf { @apply bg-leaf-600 text-white; }
+  .tap-ghost { @apply bg-white border border-line text-ink-600; }
+}

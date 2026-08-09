@@ -25,16 +25,26 @@ import { requestApproval } from '../../approval/approval.service.js';
 // ─── identitas ────────────────────────────────────────────────────────────────
 
 /** Menautkan sesi login ke baris karyawan. Tanpa ini, ESS tidak punya subjek. */
+/**
+ * Ada DUA kolom penaut antara akun dan karyawan: `User.employeeNo` dan
+ * `Employee.userId`. Keduanya sah, dan data lapangan mengisi salah satu saja
+ * tergantung urutan onboarding — karyawan dulu lalu diberi akun, atau
+ * sebaliknya. Membaca satu kolom saja membuat separuh karyawan tampak "belum
+ * ditautkan" padahal tautannya ada di kolom yang lain.
+ */
 async function meAsEmployee(actor: Actor) {
   const user = await prisma.user.findFirst({
     where: { id: actor.userId },
     select: { employeeNo: true, displayName: true },
   });
-  if (!user?.employeeNo) {
+
+  const employee = user?.employeeNo
+    ? await prisma.employee.findFirst({ where: { employeeNo: user.employeeNo } })
+    : await prisma.employee.findFirst({ where: { userId: actor.userId } });
+
+  if (!employee) {
     throw new ControlError('NOT_AN_EMPLOYEE', 'Akun ini belum ditautkan ke data karyawan', 409);
   }
-  const employee = await prisma.employee.findFirst({ where: { employeeNo: user.employeeNo } });
-  if (!employee) throw new ControlError('NOT_FOUND', 'Data karyawan tidak ditemukan', 404);
   return employee;
 }
 

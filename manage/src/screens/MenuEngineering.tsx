@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { ambilKinerjaMenu } from '../lib/api';
+import { useServer } from '../lib/useServer';
 import { Card, Pill, Stat, Tabel, Uang, type Kolom, type Tone } from '../components/ui';
 import {
-  KELAS_LABEL, KELAS_SARAN, klasifikasiMenu, persen, ringkasMenu, rupiah,
+  KELAS_LABEL, KELAS_SARAN, KINERJA_MENU, klasifikasiMenu, persen, ringkasMenu, rupiah,
   type KelasMenu, type MenuTerkelas,
 } from '../lib/data';
 
@@ -17,9 +19,14 @@ const TONE: Record<KelasMenu, Tone> = {
  * yang membuatnya berguna bagi pemilik yang tidak punya waktu menganalisis.
  */
 export function MenuEngineering() {
-  const r = ringkasMenu();
+  // Dihitung server dari PosOrderLine 30 hari terakhir. Kalau tak terjangkau,
+  // data contoh dipakai dan spanduk di bawah mengatakannya terang-terangan.
+  const { data: kinerja, nyata } = useServer(
+    async () => (await ambilKinerjaMenu(30)).data, KINERJA_MENU, 120_000,
+  );
   const [sorot, setSorot] = useState<KelasMenu | 'SEMUA'>('SEMUA');
-  const data = klasifikasiMenu();
+  const r = ringkasMenu(kinerja);
+  const data = klasifikasiMenu(kinerja);
 
   const tampil = sorot === 'SEMUA' ? data : data.filter((m) => m.kelas === sorot);
 
@@ -49,6 +56,12 @@ export function MenuEngineering() {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          mengambil keputusan menu sampai penjualan nyata termuat.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Omzet menu" value={rupiah(r.totalOmzet, true)} />
         <Stat label="Total margin" value={rupiah(r.totalMargin, true)} note={`rata-rata ${persen(r.marginRata)}`} />

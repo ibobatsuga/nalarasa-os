@@ -19,6 +19,7 @@ import {
   AvailabilityInput, BumpInput, bumpTicket, kitchenStats, listTickets,
   menuStatus, setAvailability, setLineReady,
 } from '../domains/kitchen/service.js';
+import * as manage from '../domains/manage/service.js';
 import {
   ClockInput, LeaveInput, clockIn, clockOut, myAttendance, myLeaveBalance,
   myLeaves, myPayslips, myProfile, myShifts, requestLeave,
@@ -87,6 +88,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const ctx = currentTenant()!;
     await publishCalibration(ctx.tenantId, sheet as never, req.actor.userId);
     return { published: sheet.version };
+  });
+
+  /**
+   * Konteks pemakai setelah masuk: perusahaan dan outlet yang boleh diaksesnya.
+   * Tanpa ini klien tidak punya cara mengetahui companyId, dan setiap panggilan
+   * KPI diam-diam dilewati — dashboard lalu menampilkan angka contoh tanpa
+   * satu pun galat yang bisa dilihat.
+   */
+  app.get('/me/context', async (req) => {
+    const [companies, sites] = await Promise.all([
+      prisma.company.findMany({ select: { id: true, code: true, name: true }, orderBy: { code: 'asc' } }),
+      prisma.site.findMany({ select: { id: true, code: true, name: true, isPos: true }, orderBy: { code: 'asc' } }),
+    ]);
+    return {
+      userId: req.actor.userId,
+      roleCodes: req.actor.roleCodes,
+      companies,
+      sites,
+    };
   });
 
   // ── auth ──────────────────────────────────────────────────────────────────
@@ -246,7 +266,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return o2c.openPosSession(req.actor, b.siteId, b.companyId, b.openingFloat);
   });
   app.post('/pos/sessions/:id/orders', async (req) => {
-    const b = z.object({ total: z.number().positive(), tenderType: z.enum(['CASH', 'CARD', 'QRIS', 'EWALLET']), gatewayRef: z.string().optional() }).parse(req.body);
+    // Baris pesanan WAJIB ikut: tanpanya dapur tidak pernah menerima tiket dan
+    // menu engineering tidak punya apa pun untuk dihitung. Skema rute yang lebih
+    // sempit daripada layanannya membuang data tanpa satu pun pesan galat.
+    const b = z.object({
+      total: z.number().positive(),
+      tenderType: z.enum(['CASH', 'CARD', 'QRIS', 'EWALLET']),
+      gatewayRef: z.string().optional(),
+      clientRef: z.string().min(6).optional(),
+      orderType: z.enum(['DINE_IN', 'TAKEAWAY', 'DELIVERY']).optional(),
+      tableNo: z.string().optional(),
+      cashierRef: z.string().optional(),
+      lines: z.array(z.object({
+        productCode: z.string(),
+        name: z.string(),
+        qty: z.number().positive(),
+        unitPrice: z.number().nonnegative(),
+        note: z.string().optional(),
+      })).min(1),
+    }).parse(req.body);
     return o2c.addPosOrder(req.actor, (req.params as { id: string }).id, b);
   });
   app.post('/pos/sessions/:id/close', async (req) => {
@@ -316,6 +354,52 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/kitchen/stats', async (req) => {
     const q = z.object({ siteCode: z.string() }).parse(req.query);
     return kitchenStats(req.actor, q.siteCode);
+  });
+
+  // ── manajemen ruang: meja, reservasi, acara, menu engineering ─────────────
+  app.get('/manage/tables', async (req) => {
+    const q = z.object({ siteCode: z.string() }).parse(req.query);
+    return manage.listTables(req.actor, q.siteCode);
+  });
+
+  app.post('/manage/tables/:code/status', async (req) =>
+    manage.setTableStatus(req.actor, (req.params as { code: string }).code,
+      manage.TableStatusInput.parse(req.body)));
+
+  app.get('/manage/reservations', async (req) => {
+    const q = z.object({
+      siteCode: z.string(),
+      dari: z.coerce.date().optional(),
+      sampai: z.coerce.date().optional(),
+    }).parse(req.query);
+    return manage.listReservations(req.actor, q.siteCode, q.dari, q.sampai);
+  });
+
+  app.post('/manage/reservations', async (req) =>
+    manage.createReservation(req.actor, manage.ReservationInput.parse(req.body)));
+
+  app.post('/manage/reservations/:id/status', async (req) => {
+    const b = z.object({ status: z.string() }).parse(req.body);
+    return manage.setReservationStatus(req.actor, (req.params as { id: string }).id, b.status);
+  });
+
+  app.get('/manage/events', async (req) => {
+    const q = z.object({ siteCode: z.string() }).parse(req.query);
+    return manage.listEvents(req.actor, q.siteCode);
+  });
+
+  app.post('/manage/events', async (req) =>
+    manage.createEvent(req.actor, manage.EventInput.parse(req.body)));
+
+  app.post('/manage/events/:id/status', async (req) => {
+    const b = z.object({ status: z.string() }).parse(req.body);
+    return manage.setEventStatus(req.actor, (req.params as { id: string }).id, b.status);
+  });
+
+  app.get('/manage/menu-performance', async (req) => {
+    const q = z.object({ siteCode: z.string(), hari: z.coerce.number().int().positive().max(365).default(30) })
+      .parse(req.query);
+    return manage.menuPerformance(req.actor, q.siteCode, q.hari);
   });
 
   // ── P2P ───────────────────────────────────────────────────────────────────

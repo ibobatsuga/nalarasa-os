@@ -1,4 +1,5 @@
 import { MENU, TIKET, type MenuDapur, type Tiket } from './data';
+import { sesi } from './auth';
 
 /**
  * Sambungan dapur ke server.
@@ -31,7 +32,12 @@ async function panggil<T>(jalur: string, init?: RequestInit): Promise<T | null> 
   try {
     const res = await fetch(`${BASE}${jalur}`, {
       ...init,
-      headers: { 'content-type': 'application/json', 'x-tenant': 'horison-emerald', ...(init?.headers ?? {}) },
+      headers: {
+        'content-type': 'application/json',
+        'x-tenant': 'horison-emerald',
+        authorization: `Bearer ${sesi()?.token ?? ''}`,
+        ...(init?.headers ?? {}),
+      },
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) throw new Error(String(res.status));

@@ -63,6 +63,7 @@ export const TENANT_SCOPED = new Set([
   'PayrollRun', 'Payslip', 'KpiPlan', 'KpiSnapshot',
   'Employee', 'EmploymentContract', 'ShiftAssignment', 'Attendance',
   'LeaveType', 'LeaveRequest',
+  'DiningTable', 'Reservation', 'VenueEvent',
 ]);
 
 const READ_OPS = new Set([

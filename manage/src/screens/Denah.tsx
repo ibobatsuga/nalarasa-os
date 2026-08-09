@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { ambilMeja, ambilReservasi, ubahStatusMeja } from '../lib/api';
+import { useServer } from '../lib/useServer';
 import { Card, Pill, Stat, type Tone } from '../components/ui';
 import { MEJA, RESERVASI, kapasitas, persen, type Meja, type StatusMeja } from '../lib/data';
 
@@ -16,22 +18,37 @@ const GAYA: Record<StatusMeja, { label: string; tone: Tone; kotak: string }> = {
  * dibereskan adalah kursi yang hilang, dan itu ditampilkan terang-terangan.
  */
 export function Denah() {
-  const [meja, setMeja] = useState<Meja[]>(MEJA);
+  // Denah berubah terus sepanjang layanan; muat ulang tiap 15 detik supaya
+  // pramusaji di ruang lain tidak menempatkan tamu ke meja yang sudah terisi.
+  const { data: meja, nyata, muatUlang } = useServer(ambilMeja, MEJA, 15_000);
+  const { data: reservasi } = useServer(ambilReservasi, RESERVASI, 60_000);
   const [pilih, setPilih] = useState<Meja | null>(null);
+  const [galat, setGalat] = useState('');
   const k = kapasitas(meja);
 
   const area = [...new Set(meja.map((m) => m.area))];
   const ubah = (kode: string, status: StatusMeja) => {
-    setMeja(meja.map((m) => (m.kode === kode
-      ? { ...m, status, dudukSejak: status === 'TERISI' ? 0 : undefined, tamu: status === 'TERISI' ? m.tamu : undefined }
-      : m)));
+    setGalat('');
     setPilih(null);
+    // Tulis ke server dulu, baru muat ulang. Menebak status di layar lalu gagal
+    // diam-diam adalah cara tercepat membuat dua tamu duduk di meja yang sama.
+    void ubahStatusMeja(kode, status)
+      .then(() => muatUlang())
+      .catch((e: Error) => setGalat(e.message));
   };
 
-  const resDari = (id?: string) => RESERVASI.find((r) => r.id === id);
+  const resDari = (id?: string) => reservasi.find((r) => r.id === id);
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — yang tampil di bawah adalah data contoh, bukan denah outlet Anda.
+        </p>
+      )}
+      {galat && (
+        <p className="mb-3 rounded-lg border border-brick-300 bg-brick-50 px-3 py-2 text-[12.5px] text-brick-600">{galat}</p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat label="Okupansi sekarang" value={persen(k.okupansi)}
           note={`${k.terpakai} dari ${k.total} kursi`} tone={k.okupansi > 0.8 ? 'warn' : 'good'} />

@@ -6,6 +6,8 @@ import {
   antrean, type Absensi, type Cuti, type Profil, type SaldoCuti, type Shift, type Slip,
 } from './lib/api';
 import { ABSENSI, CUTI, PROFIL, SALDO_CUTI, SHIFT, SLIP } from './lib/demo';
+import { Masuk } from './screens/Masuk';
+import { sesi } from './lib/auth';
 
 type Tab = 'absen' | 'jadwal' | 'cuti' | 'gaji' | 'profil';
 
@@ -23,6 +25,9 @@ const TAB: Array<{ key: Tab; label: string; icon: string }> = [
  * bertingkat sama sekali.
  */
 export default function App() {
+  // Sesi diperiksa sebelum data dimuat: layar yang tampak normal padahal
+  // setiap permintaannya ditolak server lebih berbahaya daripada layar masuk.
+  const [masuk, setMasuk] = useState(() => sesi() !== null);
   const [tab, setTab] = useState<Tab>('absen');
   const [online, setOnline] = useState(true);
   const [profil, setProfil] = useState<Profil | null>(null);
@@ -51,6 +56,10 @@ export default function App() {
 
   const nama = profil?.nama ?? PROFIL.nama;
   const antre = antrean().length;
+
+  if (!masuk) {
+    return <Masuk onMasuk={() => { setMasuk(true); window.location.reload(); }} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col pb-[72px]">

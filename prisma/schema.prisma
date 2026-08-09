@@ -181,6 +181,10 @@ model Site {
   geofenceM Int      @default(150)
   company   Company  @relation(fields: [companyId], references: [id])
 
+  tables       DiningTable[]
+  reservations Reservation[]
+  events       VenueEvent[]
+
   @@unique([companyId, code])
   @@index([tenantId])
 }
@@ -1142,4 +1146,76 @@ model LeaveRequest {
 
   @@index([tenantId, employeeId, startsAt])
   @@index([tenantId, status])
+}
+
+// ─── manajemen kafe/restoran (MD31–MD34) ─────────────────────────────────────
+
+/// Meja fisik. Statusnya berubah puluhan kali sehari, jadi tidak diversi-hash;
+/// yang diaudit adalah reservasi dan acara yang menempel padanya.
+model DiningTable {
+  id        String        @id @default(cuid())
+  tenantId  String        @default("")
+  siteId    String
+  code      String
+  area      String // Indoor | Teras | VIP | Rooftop
+  seats     Int
+  status    String        @default("KOSONG") // KOSONG | TERISI | DIPESAN | PERLU_BERSIH | DIGABUNG
+  seatedAt  DateTime?
+  guests    Int?
+  waiter    String?
+  mergedTo  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  site      Site          @relation(fields: [siteId], references: [id])
+  bookings  Reservation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, siteId, status])
+}
+
+model Reservation {
+  id          String       @id @default(cuid())
+  tenantId    String       @default("")
+  siteId      String
+  guestName   String
+  phone       String
+  bookedFor   DateTime
+  pax         Int
+  tableId     String?
+  /// DIKONFIRMASI | MENUNGGU | DATANG | TIDAK_DATANG | BATAL — tanpa hard delete.
+  status      String       @default("MENUNGGU")
+  source      String       @default("TELEPON") // TELEPON | WALK_IN | WHATSAPP | ONLINE
+  note        String?
+  visitCount  Int          @default(1)
+  cancelledAt DateTime?
+  versionHash String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  site        Site         @relation(fields: [siteId], references: [id])
+  table       DiningTable? @relation(fields: [tableId], references: [id])
+
+  @@index([tenantId, siteId, bookedFor])
+  @@index([tenantId, status])
+}
+
+model VenueEvent {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("")
+  siteId      String
+  name        String
+  startsAt    DateTime
+  endsAt      DateTime
+  area        String
+  pax         Int
+  kind        String // PRIVATE_DINING | MUSIK | GATHERING | ULANG_TAHUN | MEETING
+  value       Decimal  @default(0) @db.Decimal(18, 2)
+  status      String   @default("TENTATIF") // TENTATIF | PASTI | SELESAI | BATAL
+  owner       String
+  note        String?
+  versionHash String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  site        Site     @relation(fields: [siteId], references: [id])
+
+  @@index([tenantId, siteId, startsAt])
 }

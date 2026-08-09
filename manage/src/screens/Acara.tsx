@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { ambilAcara, ambilMeja, ubahStatusAcara } from '../lib/api';
+import { useServer } from '../lib/useServer';
 import { Card, Pill, Stat, Tabel, Uang, type Kolom, type Tone } from '../components/ui';
 import { ACARA, MEJA, rupiah, tanggal, type Acara as Row } from '../lib/data';
 
@@ -20,7 +22,9 @@ const JENIS: Record<Row['jenis'], string> = {
  * tamu biasa, dan itu harus terlihat sebelum reservasi diterima.
  */
 export function Acara() {
-  const [rows, setRows] = useState<Row[]>(ACARA);
+  const { data: rows, nyata, muatUlang } = useServer(ambilAcara, ACARA, 60_000);
+  const [galat, setGalat] = useState('');
+  const { data: meja } = useServer(ambilMeja, MEJA, 60_000);
   const [filter, setFilter] = useState<'MENDATANG' | 'SEMUA'>('MENDATANG');
   const hariIni = '2026-08-07';
 
@@ -39,10 +43,12 @@ export function Acara() {
     a.mulai < b.selesai && b.mulai < a.selesai);
 
   const kursiArea = (area: string) =>
-    MEJA.filter((m) => m.area === area).reduce((s, m) => s + m.kursi, 0);
+    meja.filter((m) => m.area === area).reduce((s, m) => s + m.kursi, 0);
 
-  const naikkan = (id: string) =>
-    setRows(rows.map((a) => (a.id === id ? { ...a, status: 'PASTI' } : a)));
+  const naikkan = (id: string) => {
+    setGalat('');
+    void ubahStatusAcara(id, 'PASTI').then(() => muatUlang()).catch((e: Error) => setGalat(e.message));
+  };
 
   const kolom: Kolom<Row>[] = [
     { key: 'tanggal', label: 'Tanggal', render: (a) => (

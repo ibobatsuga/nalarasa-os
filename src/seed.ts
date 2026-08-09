@@ -19,6 +19,8 @@ const PEOPLE: Array<[string, string, string, string[]]> = [
   ['u.sales', 'Ayu — Sales Rep', 'Commercial', ['R09']],
   ['u.salesmgr', 'Budi — Sales Manager', 'Commercial', ['R10']],
   ['u.cashier', 'Tono — POS Operator', 'Outlet', ['R12']],
+  // Persona aplikasi manajemen ruang: reservasi, acara, dan menu engineering.
+  ['u.svcmgr', 'Dewi — Supervisor Outlet / Service Manager', 'Outlet', ['R14']],
   ['u.buyer', 'Sari — Buyer', 'Procurement', ['R16']],
   ['u.procmgr', 'Hadi — Procurement Manager', 'Procurement', ['R17']],
   ['u.receiver', 'Eko — Receiving Clerk', 'Warehouse', ['R18']],
@@ -96,6 +98,123 @@ async function main() {
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59));
     await prisma.kpiPlan.create({
       data: { kpiCode: 'K01', companyId, periodStart: start, periodEnd: end, target: 450_000_000, approvedBy: 'SEED' },
+    });
+
+    // ── ruang: meja, reservasi hari ini, dan satu acara ──────────────────────
+    const resto = provisioned.sites.find((x) => x.code === 'RESTO-01')!;
+    const MEJA: Array<[string, string, number]> = [
+      ['T01', 'Indoor', 2], ['T02', 'Indoor', 2], ['T03', 'Indoor', 4], ['T04', 'Indoor', 4],
+      ['T05', 'Indoor', 6], ['T06', 'Teras', 4], ['T07', 'Teras', 4], ['T08', 'Teras', 2],
+      ['V01', 'VIP', 8], ['V02', 'VIP', 10], ['R01', 'Rooftop', 6], ['R02', 'Rooftop', 6],
+    ];
+    await prisma.diningTable.createMany({
+      data: MEJA.map(([code, area, seats]) => ({ siteId: resto.id, code, area, seats })),
+    });
+
+    /**
+     * Jam dinyatakan dalam WIB, disimpan sebagai UTC.
+     *
+     * Menulis `Date.UTC(..., 19, 0)` untuk "reservasi pukul 19.00" membuat layar
+     * di Indonesia menampilkan pukul 02.00 keesokan harinya. Produk ini dijual
+     * ke outlet Indonesia; jam yang meleset tujuh jam bukan detail kosmetik —
+     * jadwal shift dan reservasi menjadi salah hari.
+     */
+    const WIB_OFFSET_JAM = 7;
+    const jam = (h: number, m = 0) =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h - WIB_OFFSET_JAM, m));
+
+    for (const [nama, telepon, h, mnt, pax, sumber] of [
+      ['Bu Ratna', '081234567801', 18, 30, 4, 'WHATSAPP'],
+      ['Pak Handoko', '081234567802', 19, 0, 2, 'TELEPON'],
+      ['Keluarga Wijaya', '081234567803', 19, 30, 8, 'ONLINE'],
+      ['Mbak Sinta', '081234567804', 20, 0, 3, 'WHATSAPP'],
+    ] as Array<[string, string, number, number, number, string]>) {
+      await prisma.reservation.create({
+        data: {
+          siteId: resto.id, guestName: nama, phone: telepon, bookedFor: jam(h, mnt),
+          pax, source: sumber, status: 'DIKONFIRMASI',
+          versionHash: `seed:${telepon}`,
+        },
+      });
+    }
+
+    // ── HR: karyawan, shift, absensi, kuota cuti ────────────────────────────
+    // Tanpa baris Employee, aplikasi karyawan (ESS) tidak punya identitas untuk
+    // dipetakan dari sesi dan setiap permintaannya berakhir 409 — layar lalu
+    // jatuh ke data contoh tanpa satu pun tanda bahwa itu bukan data asli.
+    for (const [code, name, quota] of [
+      ['TAHUNAN', 'Cuti Tahunan', 12], ['SAKIT', 'Cuti Sakit', 12],
+      ['MELAHIRKAN', 'Cuti Melahirkan', 90], ['IZIN', 'Izin Tidak Dibayar', 0],
+    ] as Array<[string, string, number]>) {
+      await prisma.leaveType.create({
+        data: { code, name, quotaDays: quota, paid: code !== 'IZIN' },
+      });
+    }
+
+    const STAF: Array<[string, string, string, string]> = [
+      ['u.cashier', 'EMP-0012', 'Tono Prasetyo', 'Kasir'],
+      ['u.svcmgr', 'EMP-0009', 'Dewi Anggraini', 'Supervisor Outlet'],
+      ['u.receiver', 'EMP-0018', 'Eko Nugroho', 'Petugas Penerimaan'],
+    ];
+    const hariIni = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    for (const [subjectId, employeeNo, fullName, position] of STAF) {
+      const u = await prisma.user.findFirstOrThrow({ where: { subjectId } });
+      const emp = await prisma.employee.create({
+        data: {
+          employeeNo, fullName, position, department: 'Outlet',
+          siteId: resto.id, userId: u.id, status: 'ACTIVE',
+          hiredAt: new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 15)),
+          versionHash: `seed:${employeeNo}`,
+        },
+      });
+      // Kedua arah tautan diisi: layanan lama membaca User.employeeNo, skema
+      // menyimpan Employee.userId. Mengisi satu saja meninggalkan jebakan.
+      await prisma.user.update({ where: { id: u.id }, data: { employeeNo } });
+
+      // Empat belas hari terakhir: absen masuk-pulang, satu hari ditandai di
+      // luar radius supaya layar penandaan benar-benar punya kasus nyata.
+      for (let d = 1; d <= 14; d++) {
+        const tgl = new Date(hariIni.getTime() - d * 86_400_000);
+        if (tgl.getUTCDay() === 0) continue; // Minggu libur
+        const telat = d % 5 === 0 ? 18 : 0;
+        // Masuk 07.00 WIB.
+        const checkIn = new Date(tgl.getTime() + ((7 - WIB_OFFSET_JAM) * 60 + telat) * 60_000);
+        const checkOut = new Date(checkIn.getTime() + (8 * 60 + (d % 4 === 0 ? 45 : 0)) * 60_000);
+        const jauh = d === 4;
+        await prisma.attendance.create({
+          data: {
+            employeeId: emp.id, siteId: resto.id, checkIn, checkOut,
+            distanceM: jauh ? 410 : 35, flagged: jauh,
+            flagReason: jauh ? 'di luar radius (410 m)' : null,
+            lateMinutes: telat, overtimeMinutes: d % 4 === 0 ? 45 : 0,
+            source: 'MOBILE',
+          },
+        });
+      }
+
+      // Jadwal dua minggu ke depan.
+      for (let d = 0; d < 14; d++) {
+        const tgl = new Date(hariIni.getTime() + d * 86_400_000);
+        if (tgl.getUTCDay() === 0) continue;
+        await prisma.shiftAssignment.create({
+          data: {
+            employeeId: emp.id, siteId: resto.id, shiftDate: tgl,
+            startsAt: new Date(tgl.getTime() + (7 - WIB_OFFSET_JAM) * 3_600_000),
+            endsAt: new Date(tgl.getTime() + (15 - WIB_OFFSET_JAM) * 3_600_000),
+            role: position, publishedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    await prisma.venueEvent.create({
+      data: {
+        siteId: resto.id, name: 'Akustik Jumat Malam', area: 'Rooftop',
+        startsAt: jam(20, 0), endsAt: jam(22, 30), pax: 40, kind: 'MUSIK',
+        value: 3_500_000, status: 'PASTI', owner: 'Maya — Service Manager',
+        versionHash: 'seed:akustik',
+      },
     });
   });
 

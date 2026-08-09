@@ -9,6 +9,7 @@ import {
 import { ListView } from './components/ListView';
 import { MODULES, hasModule } from './modules/registry';
 import { api, formatKpi, rupiah, session, type ApprovalRequest, type KpiResult, type SodConflict } from './api';
+import { Masuk } from './screens/Masuk';
 
 const monthWindow = () => {
   const now = new Date();
@@ -48,6 +49,7 @@ const DEMO = {
 };
 
 export default function App() {
+  const [masuk, setMasuk] = useState(() => session.token !== '');
   const [view, setView] = useState('dashboard');
   const [kpis, setKpis] = useState<KpiResult[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
@@ -84,6 +86,10 @@ export default function App() {
     } catch (e) { setError((e as Error).message); }
   };
 
+  if (!masuk) {
+    return <Masuk onMasuk={() => { setMasuk(true); window.location.reload(); }} />;
+  }
+
   return (
     <Shell
       active={view}
@@ -93,29 +99,44 @@ export default function App() {
       tenant={session.tenant}
       user={session.user}
     >
-      {offline && (
+      {/* Spanduk bergantung pada ADA-TIDAKNYA data, bukan pada koneksi. Server
+          yang menjawab dengan nol KPI tetap menghasilkan grafik contoh, dan
+          menyembunyikan peringatan hanya karena login berhasil justru membuat
+          angka contoh terlihat seperti angka outlet sendiri. */}
+      {(offline || kpis.length === 0) && (
         <div className="card px-4 py-2.5 flex items-center gap-2 text-[12.5px] text-ink-500 border-amber-200 bg-orange-50/60">
           <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-          Mode demo — API tidak terhubung{error ? `: ${error}` : ''}. Angka di bawah contoh.
+          {offline
+            ? `Mode demo — API tidak terhubung${error ? `: ${error}` : ''}. Angka di bawah contoh.`
+            : 'Belum ada KPI tercatat untuk periode ini. Grafik di bawah masih angka contoh.'}
         </div>
       )}
 
       {view === 'dashboard' && (
         <>
+          {/* Delta hanya ditampilkan untuk angka contoh. Menempelkan "+12,4% vs
+              bulan lalu" pada KPI yang benar-benar dihitung adalah kebohongan
+              kecil yang paling mudah dipercaya: angkanya nyata, trennya karangan.
+              Perbandingan periode belum dihitung server, jadi belum ditampilkan. */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Pendapatan bersih" icon={<IconWallet />}
               value={kpi('K01') ? rupiah(kpi('K01')!.numerator ?? 0, true) : rupiah(174_600_000, true)}
-              delta={12.4} />
+              {...(kpi('K01') ? { note: 'periode berjalan' } : { delta: 12.4 })} />
             <StatCard label="Margin kotor" icon={<IconBox />}
-              value={kpi('K02') ? formatKpi(kpi('K02')!) : '65,2%'} delta={1.8} />
+              value={kpi('K02') ? formatKpi(kpi('K02')!) : '65,2%'}
+              {...(kpi('K02') ? { note: 'periode berjalan' } : { delta: 1.8 })} />
             <StatCard label="Kesehatan kontrol (K05)" icon={<IconShield />}
-              value={kpi('K05') ? formatKpi(kpi('K05')!) : '96,0%'} delta={2.1} />
+              value={kpi('K05') ? formatKpi(kpi('K05')!) : '96,0%'}
+              {...(kpi('K05') ? { note: 'periode berjalan' } : { delta: 2.1 })} />
             <StatCard label="Konflik SoD terbuka" icon={<IconShield />}
               value={String(conflicts.length)} note={conflicts.length === 0 ? 'K63 = 0 · bersih' : 'perlu mitigasi'} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
-            <Card title="Pendapatan & margin"
+            {/* DEMO.trend dan DEMO.mix masih deret contoh: server belum punya
+                endpoint deret waktu. Kartu KPI di atas sudah nyata, jadi tanpa
+                label ini pembaca wajar menyangka grafiknya nyata juga. */}
+            <Card title="Pendapatan & margin — contoh"
               action={<select className="h-8 px-2 rounded-lg border border-line bg-white text-[12.5px] text-ink-600">
                 <option>7 bulan terakhir</option><option>30 hari terakhir</option>
               </select>}>
@@ -126,7 +147,7 @@ export default function App() {
               <DualLineChart data={DEMO.trend} aName="Pendapatan" bName="Margin" />
             </Card>
 
-            <Card title="Komposisi penjualan" action={<button className="btn btn-ghost">Lihat semua</button>}>
+            <Card title="Komposisi penjualan — contoh" action={<button className="btn btn-ghost">Lihat semua</button>}>
               <Donut data={DEMO.mix} centerLabel="Agu" />
             </Card>
           </div>

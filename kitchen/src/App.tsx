@@ -3,6 +3,8 @@ import { Antrean } from './screens/Antrean';
 import { Menu } from './screens/Menu';
 import { Stok } from './screens/Stok';
 import { BAHAN, MENU, PREP, TIKET, urgensi } from './lib/data';
+import { Masuk } from './screens/Masuk';
+import { sesi } from './lib/auth';
 
 type Layar = 'antrean' | 'menu' | 'stok';
 
@@ -18,6 +20,9 @@ const TAB: Array<{ key: Layar; label: string }> = [
  * menu bertingkat.
  */
 export default function App() {
+  // Sesi diperiksa sebelum data dimuat: layar yang tampak normal padahal
+  // setiap permintaannya ditolak server lebih berbahaya daripada layar masuk.
+  const [masuk, setMasuk] = useState(() => sesi() !== null);
   const [layar, setLayar] = useState<Layar>('antrean');
   const [jam, setJam] = useState(new Date());
 
@@ -33,6 +38,10 @@ export default function App() {
     menu: MENU.filter((m) => !m.tersedia).length,
     stok: PREP.filter((p) => p.status !== 'SELESAI').length + BAHAN.filter((b) => b.stok <= b.minimum).length,
   };
+
+  if (!masuk) {
+    return <Masuk onMasuk={() => { setMasuk(true); window.location.reload(); }} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col">

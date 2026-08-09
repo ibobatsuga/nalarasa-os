@@ -56,6 +56,11 @@ export const api = {
     call<{ token: string; mustChange: boolean; actor: { userId: string } }>('/auth/login', {
       method: 'POST', body: JSON.stringify({ subjectId, password }),
     }),
+  context: () => call<{
+    userId: string; roleCodes: string[];
+    companies: Array<{ id: string; code: string; name: string }>;
+    sites: Array<{ id: string; code: string; name: string; isPos: boolean }>;
+  }>('/me/context'),
   executive: (companyId: string, from: string, to: string) =>
     call<KpiResult[]>(`/kpi/executive?companyId=${companyId}&from=${from}&to=${to}`),
   pendingApprovals: () => call<ApprovalRequest[]>('/approvals/pending'),

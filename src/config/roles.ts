@@ -23,11 +23,11 @@ export const ROLES: readonly RoleDef[] = [
   // commercial
   { code: 'R08', name: 'Marketing Specialist', maxBand: 'T0', grants: ['party.read', 'so.read'] },
   { code: 'R09', name: 'CRM / Sales Representative', maxBand: 'T0', grants: ['so.create', 'so.submit', 'so.read', 'discount.request', 'party.read', 'product.read'] },
-  { code: 'R10', name: 'Sales Manager', maxBand: 'T2', grants: ['so.read', 'so.approve', 'so.cancel', 'discount.approve', 'party.read'] },
+  { code: 'R10', name: 'Sales Manager', maxBand: 'T2', grants: ['so.read', 'so.approve', 'so.cancel', 'discount.approve', 'party.read', 'reservation.read', 'event.read', 'event.write'] },
   { code: 'R11', name: 'Pricing / Credit Reviewer', maxBand: 'T2', grants: ['discount.approve', 'so.read', 'party.read'] },
-  { code: 'R12', name: 'Digital Commerce / POS Operator', maxBand: 'T0', grants: ['pos.session.open', 'pos.session.close', 'pos.order.create', 'so.read', 'product.read'] },
-  { code: 'R13', name: 'Customer Service Agent', maxBand: 'T0', grants: ['so.read', 'party.read'] },
-  { code: 'R14', name: 'Service Manager', maxBand: 'T2', grants: ['so.read', 'so.cancel', 'invoice.creditnote.approve', 'pos.session.variance.approve'] },
+  { code: 'R12', name: 'Digital Commerce / POS Operator', maxBand: 'T0', grants: ['pos.session.open', 'pos.session.close', 'pos.order.create', 'so.read', 'product.read', 'reservation.read', 'reservation.write', 'event.read'] },
+  { code: 'R13', name: 'Customer Service Agent', maxBand: 'T0', grants: ['so.read', 'party.read', 'reservation.read', 'reservation.write', 'event.read'] },
+  { code: 'R14', name: 'Service Manager', maxBand: 'T2', grants: ['so.read', 'so.cancel', 'invoice.creditnote.approve', 'pos.session.variance.approve', 'reservation.read', 'reservation.write', 'event.read', 'event.write', 'kpi.read'] },
 
   // supply
   { code: 'R15', name: 'Business Requester', maxBand: 'T0', grants: ['req.create', 'po.read', 'product.read'] },

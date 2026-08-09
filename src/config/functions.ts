@@ -18,6 +18,9 @@ export const FUNCTIONS = [
   'invoice.create', 'invoice.post', 'invoice.creditnote.approve',
   'pos.session.open', 'pos.session.close', 'pos.session.variance.approve',
   'pos.order.create', 'pos.gateway.reconcile',
+
+  // manajemen ruang: meja, reservasi, acara
+  'reservation.read', 'reservation.write', 'event.read', 'event.write',
   'subscription.create', 'subscription.approve', 'subscription.cancel',
 
   // P2P

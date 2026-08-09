@@ -6,6 +6,7 @@
  * yang gagal terkirim berarti hari kerja yang hilang — itu masalah upah, bukan
  * masalah teknis.
  */
+import { sesi } from './auth';
 
 const BASE = '/api';
 
@@ -73,7 +74,12 @@ async function panggil<T>(jalur: string, init?: RequestInit): Promise<T | null> 
   try {
     const res = await fetch(`${BASE}${jalur}`, {
       ...init,
-      headers: { 'content-type': 'application/json', 'x-tenant': 'horison-emerald', ...(init?.headers ?? {}) },
+      headers: {
+        'content-type': 'application/json',
+        'x-tenant': 'horison-emerald',
+        authorization: `Bearer ${sesi()?.token ?? ''}`,
+        ...(init?.headers ?? {}),
+      },
       signal: AbortSignal.timeout(5000),
     });
     online = true;

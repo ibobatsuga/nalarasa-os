@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { ambilMeja, ambilReservasi, buatReservasi, ubahStatusReservasi } from '../lib/api';
+import { useServer } from '../lib/useServer';
 import { Card, Field, Pill, Stat, Tabel, input, select, type Kolom, type Tone } from '../components/ui';
 import { MEJA, RESERVASI, kapasitas, type Reservasi as Row, type StatusReservasi } from '../lib/data';
 
@@ -18,12 +20,14 @@ const HARI_INI = '2026-08-07';
  * saat penuh) dan angka tidak-datang, karena itulah kursi yang terbuang paling mahal.
  */
 export function Reservasi() {
-  const [rows, setRows] = useState<Row[]>(RESERVASI);
+  const { data: rows, nyata, muatUlang } = useServer(ambilReservasi, RESERVASI, 30_000);
+  const { data: meja } = useServer(ambilMeja, MEJA, 60_000);
   const [buka, setBuka] = useState(false);
   const [tgl, setTgl] = useState(HARI_INI);
+  const [galat, setGalat] = useState('');
   const [form, setForm] = useState({ nama: '', telepon: '', waktu: '19:00', pax: '2', meja: '', catatan: '', sumber: 'WHATSAPP' });
 
-  const k = kapasitas();
+  const k = kapasitas(meja);
   const hariIni = rows.filter((r) => r.tanggal === tgl && r.status !== 'BATAL');
   const paxDipesan = hariIni.filter((r) => r.status !== 'TIDAK_DATANG').reduce((s, r) => s + r.pax, 0);
   const tidakDatang = rows.filter((r) => r.status === 'TIDAK_DATANG');
@@ -32,18 +36,27 @@ export function Reservasi() {
   const simpan = () => {
     const pax = Number(form.pax || 0);
     if (!form.nama.trim() || pax <= 0) return;
-    setRows([{
-      id: `R-${rows.length + 1}`, nama: form.nama.trim(), telepon: form.telepon,
-      waktu: form.waktu, tanggal: tgl, pax, meja: form.meja || undefined,
-      status: 'MENUNGGU', catatan: form.catatan || undefined,
-      sumber: form.sumber as Row['sumber'], kunjunganKe: 1,
-    }, ...rows]);
-    setForm({ ...form, nama: '', telepon: '', catatan: '', meja: '' });
-    setBuka(false);
+    setGalat('');
+    // Server yang menentukan kunjungan ke berapa dan menolak meja yang terlalu
+    // kecil; menyimpan dulu di layar berarti menjanjikan tempat yang belum tentu ada.
+    void buatReservasi({
+      nama: form.nama.trim(), telepon: form.telepon,
+      waktuIso: `${tgl}T${form.waktu}:00.000Z`, pax,
+      meja: form.meja || undefined, sumber: form.sumber as Row['sumber'],
+      catatan: form.catatan || undefined,
+    })
+      .then(() => {
+        setForm({ ...form, nama: '', telepon: '', catatan: '', meja: '' });
+        setBuka(false);
+        muatUlang();
+      })
+      .catch((e: Error) => setGalat(e.message));
   };
 
-  const ubahStatus = (id: string, status: StatusReservasi) =>
-    setRows(rows.map((r) => (r.id === id ? { ...r, status } : r)));
+  const ubahStatus = (id: string, status: StatusReservasi) => {
+    setGalat('');
+    void ubahStatusReservasi(id, status).then(() => muatUlang()).catch((e: Error) => setGalat(e.message));
+  };
 
   const kolom: Kolom<Row>[] = [
     { key: 'waktu', label: 'Jam', render: (r) => <span className="font-semibold text-navy-800">{r.waktu}</span> },
@@ -79,6 +92,14 @@ export function Reservasi() {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — daftar di bawah adalah data contoh, bukan reservasi outlet Anda.
+        </p>
+      )}
+      {galat && (
+        <p className="mb-3 rounded-lg border border-brick-300 bg-brick-50 px-3 py-2 text-[12.5px] text-brick-600">{galat}</p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Reservasi hari ini" value={String(hariIni.length)} note={`${paxDipesan} orang`} />
         <Stat label="Kursi tersisa setelah reservasi" value={String(Math.max(0, k.siapJual - paxDipesan))}

@@ -46,12 +46,33 @@ const rangeOf = (w: Window) => ({ gte: w.from, lte: w.to });
 
 // ─── K01 net revenue vs plan ──────────────────────────────────────────────────
 
+/**
+ * Pendapatan bersih = faktur + penjualan kasir.
+ *
+ * Menghitung faktur saja adalah warisan model B2B. Di kafe dan restoran hampir
+ * seluruh omzet lewat mesin kasir dan tidak pernah difakturkan — K01 akan
+ * membaca Rp 0 selamanya sementara laci penuh, dan itu KPI utama produk ini.
+ *
+ * Pesanan pembalik (void) bertotal negatif dan sengaja IKUT dijumlahkan:
+ * refund memang mengurangi pendapatan. Yang dikecualikan hanya pesanan asli
+ * yang sudah dibatalkan, supaya pembatalan tidak terhitung dua kali.
+ */
 export async function netRevenue(w: Window): Promise<number> {
-  const agg = await prisma.invoice.aggregate({
-    _sum: { total: true },
-    where: { companyId: w.companyId, status: 'EXECUTED', issuedAt: rangeOf(w) },
-  });
-  return round2(num(agg._sum.total));
+  const [faktur, kasir] = await Promise.all([
+    prisma.invoice.aggregate({
+      _sum: { total: true },
+      where: { companyId: w.companyId, status: 'EXECUTED', issuedAt: rangeOf(w) },
+    }),
+    prisma.posOrder.aggregate({
+      _sum: { total: true },
+      where: {
+        session: { companyId: w.companyId },
+        createdAt: rangeOf(w),
+        voidedAt: null,
+      },
+    }),
+  ]);
+  return round2(num(faktur._sum.total) + num(kasir._sum.total));
 }
 
 export async function k01(w: Window): Promise<KpiResult> {
@@ -66,12 +87,27 @@ export async function k01(w: Window): Promise<KpiResult> {
 
 // ─── K02 gross margin ─────────────────────────────────────────────────────────
 
+/**
+ * Margin kotor. Sama seperti K01, sumbernya tidak boleh hanya SalesOrder:
+ * di kafe hampir seluruh penjualan lewat kasir dan tidak pernah menjadi
+ * sales order. Margin kasir memakai stdCost produk sebagai HPP — sumber yang
+ * sama yang dipakai membukukan jurnal POS, jadi kartu KPI dan grafik laba rugi
+ * tidak mungkin menampilkan dua angka berbeda.
+ */
 export async function k02(w: Window): Promise<KpiResult> {
   const def = KPI_BY_CODE.get('K02')!;
-  const orders = await prisma.salesOrder.findMany({
-    where: { companyId: w.companyId, billedAt: rangeOf(w), status: { notIn: ['CANCELLED', 'REVERSED'] } },
-    include: { lines: true },
-  });
+  const [orders, posLines, products] = await Promise.all([
+    prisma.salesOrder.findMany({
+      where: { companyId: w.companyId, billedAt: rangeOf(w), status: { notIn: ['CANCELLED', 'REVERSED'] } },
+      include: { lines: true },
+    }),
+    prisma.posOrderLine.findMany({
+      where: { order: { session: { companyId: w.companyId }, createdAt: rangeOf(w), voidedAt: null } },
+      select: { productCode: true, qty: true, unitPrice: true },
+    }),
+    prisma.product.findMany({ select: { code: true, stdCost: true } }),
+  ]);
+
   let net = 0, cogs = 0;
   for (const o of orders) {
     for (const l of o.lines) {
@@ -80,8 +116,16 @@ export async function k02(w: Window): Promise<KpiResult> {
       cogs += num(l.qty) * num(l.unitCost);
     }
   }
+
+  const biaya = new Map(products.map((p) => [p.code, num(p.stdCost)]));
+  for (const l of posLines) {
+    net += num(l.qty) * num(l.unitPrice);
+    cogs += num(l.qty) * (biaya.get(l.productCode) ?? 0);
+  }
+
   net = round2(net); cogs = round2(cogs);
-  return build(def, w, round2(net - cogs), net, Number(ratio(net - cogs, net).toFixed(4)), { orders: orders.length, cogs });
+  return build(def, w, round2(net - cogs), net, Number(ratio(net - cogs, net).toFixed(4)),
+    { orders: orders.length, posLines: posLines.length, cogs });
 }
 
 // ─── K37 DSO, K40 DPO, K03 CCC ────────────────────────────────────────────────

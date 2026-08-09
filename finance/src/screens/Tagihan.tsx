@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Card, Pill, Stat, Tabel, Uang, type Kolom, type Tone } from '../components/ui';
 import { TAGIHAN, rupiah, tanggal, type Tagihan as Row } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilTagihan } from '../lib/api';
 
 const STATUS: Record<Row['status'], { label: string; tone: Tone }> = {
   BELUM_JATUH_TEMPO: { label: 'Belum jatuh tempo', tone: 'info' },
@@ -16,7 +18,8 @@ const umur = (iso: string) =>
  * berapa, kapan, dan sudah lewat berapa hari. Yang berbeda hanya arah uangnya.
  */
 export function Tagihan({ jenis }: { jenis: Row['jenis'] }) {
-  const [rows] = useState<Row[]>(TAGIHAN.filter((t) => t.jenis === jenis));
+  const { data: semua, nyata } = useServer(ambilTagihan, TAGIHAN, 60_000);
+  const rows = semua.filter((t) => t.jenis === jenis);
   const [filter, setFilter] = useState<'SEMUA' | Row['status']>('SEMUA');
 
   const tampil = rows.filter((t) => filter === 'SEMUA' || t.status === filter);
@@ -58,6 +61,12 @@ export function Tagihan({ jenis }: { jenis: Row['jenis'] }) {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          untuk keputusan pembayaran atau pelaporan pajak.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label={jenis === 'UTANG' ? 'Total utang' : 'Total piutang'}
           value={rupiah(belumLunas.reduce((s, t) => s + sisa(t), 0), true)} note={`${belumLunas.length} tagihan`} />

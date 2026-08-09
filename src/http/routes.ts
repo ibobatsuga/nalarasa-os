@@ -20,6 +20,13 @@ import {
   menuStatus, setAvailability, setLineReady,
 } from '../domains/kitchen/service.js';
 import * as manage from '../domains/manage/service.js';
+import * as finance from '../domains/finance/service.js';
+
+/** Rentang tanggal opsional; layanan memakai bulan berjalan bila kosong. */
+const TANGGAL = z.object({
+  dari: z.coerce.date().optional(),
+  sampai: z.coerce.date().optional(),
+});
 import {
   ClockInput, LeaveInput, clockIn, clockOut, myAttendance, myLeaveBalance,
   myLeaves, myPayslips, myProfile, myShifts, requestLeave,
@@ -394,6 +401,43 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.post('/manage/events/:id/status', async (req) => {
     const b = z.object({ status: z.string() }).parse(req.body);
     return manage.setEventStatus(req.actor, (req.params as { id: string }).id, b.status);
+  });
+
+  // ── keuangan (baca saja; pembukuan tetap lewat jalur R2R berkontrol) ──────
+  app.get('/finance/summary', async (req) => {
+    const q = TANGGAL.parse(req.query);
+    return finance.summary(req.actor, q.dari, q.sampai);
+  });
+  app.get('/finance/accounts', async (req) => finance.chartOfAccounts(req.actor));
+  app.get('/finance/transactions', async (req) => {
+    const q = TANGGAL.parse(req.query);
+    return finance.transactions(req.actor, q.dari, q.sampai);
+  });
+  app.get('/finance/ledger', async (req) => {
+    const q = TANGGAL.parse(req.query);
+    return finance.ledger(req.actor, q.dari, q.sampai);
+  });
+  app.get('/finance/income-statement', async (req) => {
+    const q = TANGGAL.parse(req.query);
+    return finance.incomeStatement(req.actor, q.dari, q.sampai);
+  });
+  app.get('/finance/cash-position', async (req) => {
+    const q = TANGGAL.parse(req.query);
+    return finance.cashPosition(req.actor, q.dari, q.sampai);
+  });
+  app.get('/finance/payables', async (req) => finance.payables(req.actor));
+  app.get('/finance/cash-deposits', async (req) => {
+    const q = z.object({ hari: z.coerce.number().int().positive().max(365).default(30) }).parse(req.query);
+    return finance.cashDeposits(req.actor, q.hari);
+  });
+  app.get('/finance/periods', async (req) => finance.periods(req.actor));
+  app.get('/finance/trend', async (req) => {
+    const q = z.object({ bulan: z.coerce.number().int().positive().max(24).default(7) }).parse(req.query);
+    return finance.monthlyTrend(req.actor, q.bulan);
+  });
+  app.get('/finance/sales-mix', async (req) => {
+    const q = z.object({ hari: z.coerce.number().int().positive().max(365).default(30) }).parse(req.query);
+    return finance.salesMix(req.actor, q.hari);
   });
 
   app.get('/manage/menu-performance', async (req) => {

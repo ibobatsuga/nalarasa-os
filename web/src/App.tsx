@@ -55,18 +55,25 @@ export default function App() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [conflicts, setConflicts] = useState<SodConflict[]>([]);
   const [offline, setOffline] = useState(false);
+  const [trend, setTrend] = useState<LinePoint[] | null>(null);
+  const [mix, setMix] = useState<Slice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const w = monthWindow();
-      const [k, a, c] = await Promise.all([
+      const [k, a, c, t, m] = await Promise.all([
         session.companyId ? api.executive(session.companyId, w.from, w.to) : Promise.resolve([]),
         api.pendingApprovals(),
         api.conflicts().catch(() => [] as SodConflict[]),
+        // Deret waktu dan komposisi tidak boleh menjatuhkan seluruh muatan:
+        // KPI dan antrean persetujuan jauh lebih penting daripada dua grafik.
+        api.trend(7).catch(() => null),
+        api.salesMix(30).catch(() => null),
       ]);
       setKpis(k); setApprovals(a); setConflicts(c); setOffline(false);
+      setTrend(t); setMix(m && m.length ? m : null);
     } catch (e) {
       setOffline(true);
       setError((e as Error).message);
@@ -133,10 +140,10 @@ export default function App() {
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
-            {/* DEMO.trend dan DEMO.mix masih deret contoh: server belum punya
-                endpoint deret waktu. Kartu KPI di atas sudah nyata, jadi tanpa
-                label ini pembaca wajar menyangka grafiknya nyata juga. */}
-            <Card title="Pendapatan & margin — contoh"
+            {/* Judul menyebut "contoh" HANYA saat servernya memang belum
+                menjawab. Grafik contoh yang tidak berlabel, di bawah kartu KPI
+                yang nyata, adalah kombinasi paling menyesatkan di satu layar. */}
+            <Card title={`Pendapatan & margin${trend ? '' : ' — contoh'}`}
               action={<select className="h-8 px-2 rounded-lg border border-line bg-white text-[12.5px] text-ink-600">
                 <option>7 bulan terakhir</option><option>30 hari terakhir</option>
               </select>}>
@@ -144,22 +151,22 @@ export default function App() {
                 <Legend color="#17376b" label="Pendapatan" />
                 <Legend color="#a3c644" label="Margin kotor (%)" />
               </div>
-              <DualLineChart data={DEMO.trend} aName="Pendapatan" bName="Margin" />
+              <DualLineChart data={trend ?? DEMO.trend} aName="Pendapatan" bName="Margin" />
             </Card>
 
-            <Card title="Komposisi penjualan — contoh" action={<button className="btn btn-ghost">Lihat semua</button>}>
-              <Donut data={DEMO.mix} centerLabel="Agu" />
+            <Card title={`Komposisi penjualan${mix ? '' : ' — contoh'}`} action={<button className="btn btn-ghost">Lihat semua</button>}>
+              <Donut data={mix ?? DEMO.mix} centerLabel="Agu" />
             </Card>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
-            <Card title="Aktivitas terbaru">
+            <Card title="Aktivitas terbaru — contoh">
               <ul className="divide-y divide-line">
                 {DEMO.activity.map((a) => <Row key={a.title} icon={a.icon} title={a.title} meta={a.meta} />)}
               </ul>
             </Card>
 
-            <Card title="Penjualan per outlet">
+            <Card title="Penjualan per outlet — contoh">
               <ul className="divide-y divide-line">
                 {DEMO.outlets.map((o) => (
                   <Row key={o.name} icon={<IconRegister />} title={o.name} meta={o.meta} right={rupiah(o.value, true)} />

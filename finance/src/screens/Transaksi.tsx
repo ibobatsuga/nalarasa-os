@@ -4,6 +4,8 @@ import {
   AKUN, KATEGORI_KELUAR, KATEGORI_MASUK, STRUK, TRANSAKSI, akunNama,
   rupiah, tanggal, type Arah, type StatusDoc, type Transaksi as Trx,
 } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilTransaksi } from '../lib/api';
 
 const STATUS: Record<StatusDoc, { label: string; tone: Tone }> = {
   DRAFT: { label: 'Draft', tone: 'neutral' },
@@ -23,7 +25,11 @@ const SUMBER: Record<Trx['sumber'], Tone> = {
  * punya jejak sistem: bayar sewa, token listrik, tarik modal.
  */
 export function Transaksi() {
-  const [rows, setRows] = useState<Trx[]>(TRANSAKSI);
+  // Daftar transaksi datang dari buku besar. `setRows` masih dipakai untuk
+  // penyuntingan lokal sebelum dikirim; muat ulang server menimpanya.
+  const { data: dariServer, nyata } = useServer(ambilTransaksi, TRANSAKSI, 60_000);
+  const [suntingan, setRows] = useState<Trx[] | null>(null);
+  const rows = suntingan ?? dariServer;
   const [buka, setBuka] = useState(false);
   const [filter, setFilter] = useState<'SEMUA' | StatusDoc>('SEMUA');
   const [q, setQ] = useState('');

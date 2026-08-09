@@ -61,6 +61,8 @@ export const api = {
     companies: Array<{ id: string; code: string; name: string }>;
     sites: Array<{ id: string; code: string; name: string; isPos: boolean }>;
   }>('/me/context'),
+  trend: (bulan = 7) => call<Array<{ label: string; a: number; b: number }>>(`/finance/trend?bulan=${bulan}`),
+  salesMix: (hari = 30) => call<Array<{ label: string; value: number }>>(`/finance/sales-mix?hari=${hari}`),
   executive: (companyId: string, from: string, to: string) =>
     call<KpiResult[]>(`/kpi/executive?companyId=${companyId}&from=${from}&to=${to}`),
   pendingApprovals: () => call<ApprovalRequest[]>('/approvals/pending'),

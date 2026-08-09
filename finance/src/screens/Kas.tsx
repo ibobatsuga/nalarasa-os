@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Baris, Card, Pill, Stat, Tabel, Uang, type Kolom, type Tone } from '../components/ui';
 import { SETORAN, TRANSAKSI, posisiKas, rupiah, tanggal, type SetoranKas, type Transaksi } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilPosisiKas, ambilSetoran, ambilTransaksi } from '../lib/api';
 
 const STATUS: Record<SetoranKas['status'], { label: string; tone: Tone }> = {
   MENUNGGU_SETOR: { label: 'Belum disetor', tone: 'warn' },
@@ -15,9 +17,11 @@ const STATUS: Record<SetoranKas['status'], { label: string; tone: Tone }> = {
  */
 export function Kas() {
   const [tab, setTab] = useState<'setoran' | 'buku'>('setoran');
-  const kas = posisiKas();
-  const belumSetor = SETORAN.filter((s) => s.status === 'MENUNGGU_SETOR');
-  const selisihTotal = SETORAN.reduce((s, x) => s + x.selisih, 0);
+  const { data: kas, nyata } = useServer(ambilPosisiKas, posisiKas(), 60_000);
+  const { data: setoran } = useServer(ambilSetoran, SETORAN, 60_000);
+  const { data: transaksi } = useServer(ambilTransaksi, TRANSAKSI, 60_000);
+  const belumSetor = setoran.filter((s) => s.status === 'MENUNGGU_SETOR');
+  const selisihTotal = setoran.reduce((s, x) => s + x.selisih, 0);
 
   const kolomSetoran: Kolom<SetoranKas>[] = [
     { key: 'tanggal', label: 'Tanggal', render: (s) => tanggal(s.tanggal) },
@@ -30,7 +34,7 @@ export function Kas() {
     { key: 'status', label: 'Status', render: (s) => <Pill {...STATUS[s.status]} /> },
   ];
 
-  const bukuKas = TRANSAKSI.filter((t) => t.status === 'DIBUKUKAN');
+  const bukuKas = transaksi.filter((t) => t.status === 'DIBUKUKAN');
   let saldo = 0;
   const barisBuku = bukuKas
     .slice()
@@ -53,6 +57,12 @@ export function Kas() {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          untuk keputusan pembayaran atau pelaporan pajak.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Kas & bank" value={rupiah(kas.reduce((s, k) => s + k.saldo, 0), true)} />
         <Stat label="Belum disetor ke bank" value={rupiah(belumSetor.reduce((s, x) => s + x.kasDihitung, 0), true)}
@@ -73,7 +83,7 @@ export function Kas() {
       {tab === 'setoran' ? (
         <Card title="Setoran tunai per sesi kasir"
           action={<button className="btn btn-primary">+ Catat Setoran</button>}>
-          <Tabel kolom={kolomSetoran} data={SETORAN} />
+          <Tabel kolom={kolomSetoran} data={setoran} />
           <p className="mt-3 text-[11.5px] text-ink-400">
             Baris ini datang otomatis dari aplikasi kasir saat shift ditutup. Selisih di luar
             batas outlet sudah diajukan ke pemilik lewat Nalarasa OS — tidak perlu diajukan lagi di sini.

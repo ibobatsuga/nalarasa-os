@@ -83,6 +83,7 @@ export interface Bootstrap {
   tenantId: string;
   catalog: CatalogItem[];
   cashiers: Cashier[];
+  site?: { id: string; code: string; name: string; companyId: string };
 }
 
 /**
@@ -94,6 +95,9 @@ export async function bootstrap(siteCode: string): Promise<Bootstrap> {
     const res = await fetch(`${BASE}/pos/till/bootstrap?siteCode=${encodeURIComponent(siteCode)}`, { headers: headers() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json() as Partial<Bootstrap>;
+    // Tanpa companyId, sesi terbuka dengan perusahaan kosong dan tidak satu pun
+    // penjualannya bisa masuk buku besar.
+    if (body.site?.companyId) localStorage.setItem('pos.companyId', body.site.companyId);
     if (body.catalog?.length) store.setCatalog(body.catalog);
     if (body.cashiers) store.setCashiers(body.cashiers);
     patch({ online: true });

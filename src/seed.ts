@@ -3,6 +3,7 @@ import { withTenant } from './core/tenant.js';
 import { versionHash } from './core/hash.js';
 import { CALIBRATION_VERSION } from './config/calibration.js';
 import { setPassword } from './iam/auth.js';
+import { newPinSalt, pinHash } from './domains/o2c/pos-sync.js';
 import { ensureRoleCatalogue, provisionTenant } from './tenancy/provision.js';
 
 /** Dev bootstrap password. Every seeded account must change it at first login. */
@@ -151,14 +152,17 @@ async function main() {
       });
     }
 
-    const STAF: Array<[string, string, string, string]> = [
-      ['u.cashier', 'EMP-0012', 'Tono Prasetyo', 'Kasir'],
-      ['u.svcmgr', 'EMP-0009', 'Dewi Anggraini', 'Supervisor Outlet'],
-      ['u.receiver', 'EMP-0018', 'Eko Nugroho', 'Petugas Penerimaan'],
+    // PIN enam angka, sama panjang dengan PIN ATM. Tanpa ini bootstrap till
+    // mengirim daftar kasir kosong dan mesin kasir jatuh ke masuk-dengan-nama —
+    // yang berarti tidak ada satu pun transaksi yang bisa ditelusuri ke orang.
+    const STAF: Array<[string, string, string, string, string]> = [
+      ['u.cashier', 'EMP-0012', 'Tono Prasetyo', 'Kasir', '246810'],
+      ['u.svcmgr', 'EMP-0009', 'Dewi Anggraini', 'Supervisor Outlet', '778899'],
+      ['u.receiver', 'EMP-0018', 'Eko Nugroho', 'Petugas Penerimaan', '135791'],
     ];
     const hariIni = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
-    for (const [subjectId, employeeNo, fullName, position] of STAF) {
+    for (const [subjectId, employeeNo, fullName, position, pin] of STAF) {
       const u = await prisma.user.findFirstOrThrow({ where: { subjectId } });
       const emp = await prisma.employee.create({
         data: {
@@ -171,6 +175,11 @@ async function main() {
       // Kedua arah tautan diisi: layanan lama membaca User.employeeNo, skema
       // menyimpan Employee.userId. Mengisi satu saja meninggalkan jebakan.
       await prisma.user.update({ where: { id: u.id }, data: { employeeNo } });
+      const garam = newPinSalt();
+      await prisma.employee.update({
+        where: { id: emp.id },
+        data: { posPinSalt: garam, posPinHash: await pinHash(garam, pin) },
+      });
 
       // Empat belas hari terakhir: absen masuk-pulang, satu hari ditandai di
       // luar radius supaya layar penandaan benar-benar punya kasus nyata.

@@ -191,6 +191,19 @@ export async function openPosSession(
   actor: Actor, siteId: string, companyId: string, openingFloat: number, clientRef?: string,
 ) {
   assertCan(actor, 'pos.session.open');
+
+  // Sesi tanpa perusahaan tidak akan pernah bisa dibukukan: periode akuntansi
+  // dikunci per perusahaan, jadi setiap penjualan di sesi ini gagal masuk buku
+  // besar selamanya. Ditolak di depan, bukan dibiarkan menumpuk diam-diam.
+  const site = await prisma.site.findFirst({ where: { id: siteId }, select: { companyId: true } });
+  if (!site) throw new ControlError('UNKNOWN_SITE', 'Outlet tidak ditemukan', 404);
+  const perusahaan = companyId || site.companyId;
+  if (perusahaan !== site.companyId) {
+    throw new ControlError('COMPANY_MISMATCH', 'Outlet ini milik perusahaan lain', 409,
+      { siteCompanyId: site.companyId, diminta: companyId });
+  }
+  companyId = perusahaan;
+
   const vh = versionHash({ siteId, companyId, openingFloat, clientRef: clientRef ?? null });
   const s = await prisma.posSession.create({
     data: { siteId, companyId, openedBy: actor.userId, openingFloat, versionHash: vh, clientRef: clientRef ?? null },
@@ -233,8 +246,82 @@ export async function addPosOrder(actor: Actor, sessionId: string, input: {
       await tx.posSession.update({ where: { id: sessionId }, data: { expectedCash: { increment: input.total } } });
     }
     await audit({ actor, action: 'pos.order.create', docType: 'PosSession', docId: sessionId, versionHash: session.versionHash, meta: { posOrderId: order.id, tender: input.tenderType } }, tx as Tx);
+    return { order, companyId: session.companyId };
+  }).then(async ({ order, companyId }) => {
+    // Pembukuan dilakukan SETELAH order commit, bukan di dalamnya: transaksi
+    // bersarang saling mengunci, dan sebuah penjualan yang sudah diterima
+    // uangnya tidak boleh dibatalkan hanya karena bagan akun belum lengkap.
+    await bookPosRevenue(order.id, companyId, num(order.total), order.createdAt, input.lines ?? []);
     return order;
   });
+}
+
+/**
+ * Membukukan penjualan kasir ke buku besar.
+ *
+ * Sebelum ini, PosOrder tercatat rapi tapi tidak pernah menyentuh GL: laporan
+ * laba rugi menampilkan pendapatan Rp 0 sementara laci penuh, dan KPI omzet
+ * ikut nol. Kasir sendiri tidak memegang journal.post — yang memposting adalah
+ * sistem, dan jejak auditnya menyebut demikian.
+ *
+ * TIDAK PERNAH melempar. Penjualan yang uangnya sudah diterima tidak boleh
+ * gagal karena akuntansi; kegagalan dicatat sebagai peristiwa audit yang bisa
+ * dicari, supaya selisihnya terlihat alih-alih hilang diam-diam.
+ */
+async function bookPosRevenue(
+  orderId: string, companyId: string, total: number, at: Date,
+  lines: Array<{ productCode: string; qty: number }>,
+): Promise<void> {
+  const sistem: Actor = { userId: 'SYSTEM', roleCodes: ['R33'] };
+  try {
+    const [kas, pendapatan, hpp] = await Promise.all([
+      prisma.account.findFirst({ where: { code: '1-1100', status: 'ACTIVE' } }),
+      prisma.account.findFirst({ where: { code: '4-1000', status: 'ACTIVE' } }),
+      prisma.account.findFirst({ where: { code: '5-1000', status: 'ACTIVE' } }),
+    ]);
+    if (!kas || !pendapatan) {
+      await audit({
+        actor: sistem, action: 'pos.revenue.unbooked', docType: 'PosOrder', docId: orderId,
+        reasonCode: 'NO_ACCOUNT', meta: { total, butuh: ['1-1100', '4-1000'] },
+      });
+      return;
+    }
+
+    const jurnal = [
+      { accountId: kas.id, debit: round2(total), credit: 0 },
+      { accountId: pendapatan.id, debit: 0, credit: round2(total) },
+    ];
+
+    // HPP dibukukan bila biaya standarnya diketahui. Produk tanpa stdCost
+    // dilewati — menebak biaya lebih buruk daripada tidak mencatatnya.
+    if (hpp && lines.length > 0) {
+      const kode = lines.map((l) => l.productCode);
+      const produk = await prisma.product.findMany({
+        where: { code: { in: kode } },
+        select: { code: true, stdCost: true },
+      });
+      const biaya = new Map(produk.map((x) => [x.code, num(x.stdCost)]));
+      const totalHpp = round2(lines.reduce((sum, l) => sum + (biaya.get(l.productCode) ?? 0) * l.qty, 0));
+      if (totalHpp > 0) {
+        jurnal.push({ accountId: hpp.id, debit: totalHpp, credit: 0 });
+        jurnal.push({ accountId: kas.id, debit: 0, credit: totalHpp });
+      }
+    }
+
+    const { postSubledgerEvent } = await import('../r2r/service.js');
+    await postSubledgerEvent(sistem, {
+      companyId, journalCode: 'POS', postingDate: at, source: 'SUBLEDGER',
+      memo: `Penjualan kasir ${orderId.slice(-8)}`,
+      sourceDocType: 'PosOrder', sourceDocId: orderId,
+      lines: jurnal,
+    });
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    await audit({
+      actor: sistem, action: 'pos.revenue.unbooked', docType: 'PosOrder', docId: orderId,
+      reasonCode: err.code ?? 'ERROR', meta: { total, pesan: err.message ?? String(e) },
+    });
+  }
 }
 
 /** Close = count cash, compute variance, route AR25P by variance magnitude. */

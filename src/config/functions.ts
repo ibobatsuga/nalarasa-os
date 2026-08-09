@@ -31,7 +31,7 @@ export const FUNCTIONS = [
   'payment.prepare', 'payment.approve', 'payment.release', 'payment.reconcile',
 
   // R2R
-  'journal.prepare', 'journal.approve', 'journal.post', 'journal.reverse',
+  'journal.prepare', 'journal.approve', 'journal.post', 'journal.reverse', 'journal.read',
   'period.close', 'period.reopen', 'bank.reconcile',
 
   // HR / payroll

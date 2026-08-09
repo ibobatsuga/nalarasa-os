@@ -3,21 +3,27 @@ import {
   SETORAN, STRUK, TAGIHAN, TRANSAKSI, akunNama, labaRugi, posisiKas,
   rupiah, tanggal, persen, type Transaksi,
 } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilLabaRugi, ambilPosisiKas, ambilSetoran, ambilTagihan, ambilTransaksi } from '../lib/api';
 
 /**
  * Layar pertama menjawab pertanyaan yang ditanyakan admin tiap pagi:
  * uang saya ada berapa, apa yang harus dikerjakan hari ini, ada yang aneh tidak.
  */
 export function Beranda({ onNavigate }: { onNavigate: (k: string) => void }) {
-  const kas = posisiKas();
+  // Konstanta demo hanya jadi nilai awal; begitu server menjawab, angka GL menang.
+  const { data: kas } = useServer(ambilPosisiKas, posisiKas(), 60_000);
   const totalKas = kas.reduce((s, k) => s + k.saldo, 0);
-  const lr = labaRugi();
+  const { data: lr, nyata } = useServer(ambilLabaRugi, labaRugi(), 60_000);
+  const { data: setoran } = useServer(ambilSetoran, SETORAN, 60_000);
+  const { data: tagihan } = useServer(ambilTagihan, TAGIHAN, 60_000);
+  const { data: transaksi } = useServer(ambilTransaksi, TRANSAKSI, 60_000);
 
-  const belumSetor = SETORAN.filter((s) => s.status === 'MENUNGGU_SETOR');
+  const belumSetor = setoran.filter((s) => s.status === 'MENUNGGU_SETOR');
   const strukAntre = STRUK.filter((s) => s.status !== 'DIBUKUKAN');
-  const trxMenunggu = TRANSAKSI.filter((t) => t.status === 'DIAJUKAN');
-  const jatuhTempo = TAGIHAN.filter((t) => t.status === 'JATUH_TEMPO');
-  const utangDekat = TAGIHAN.filter((t) => t.jenis === 'UTANG' && t.status === 'BELUM_JATUH_TEMPO');
+  const trxMenunggu = transaksi.filter((t) => t.status === 'DIAJUKAN');
+  const jatuhTempo = tagihan.filter((t) => t.status === 'JATUH_TEMPO');
+  const utangDekat = tagihan.filter((t) => t.jenis === 'UTANG' && t.status === 'BELUM_JATUH_TEMPO');
 
   const tugas = [
     { label: 'Setoran tunai belum masuk bank', n: belumSetor.length, ke: 'kas', tone: 'warn' as const },
@@ -35,6 +41,12 @@ export function Beranda({ onNavigate }: { onNavigate: (k: string) => void }) {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          untuk keputusan pembayaran atau pelaporan pajak.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Total kas & bank" value={rupiah(totalKas, true)} note={`${kas.length} rekening`} />
         <Stat label="Laba bersih bulan ini" value={rupiah(lr.labaBersih, true)}
@@ -79,7 +91,7 @@ export function Beranda({ onNavigate }: { onNavigate: (k: string) => void }) {
           <Card title="Transaksi terbaru"
             action={<button onClick={() => onNavigate('transaksi')} className="btn btn-ghost">Lihat semua</button>}>
             <Tabel kolom={kolomTrx}
-            data={[...TRANSAKSI].sort((a, b) => b.tanggal.localeCompare(a.tanggal)).slice(0, 8)} />
+            data={[...transaksi].sort((a, b) => b.tanggal.localeCompare(a.tanggal)).slice(0, 8)} />
           </Card>
 
           <Card title="Ringkas bulan berjalan">

@@ -10,6 +10,8 @@ import { Pajak } from './screens/Pajak';
 import { Laporan } from './screens/Laporan';
 import { Persetujuan, Pengaturan } from './screens/Lainnya';
 import { SETORAN, STRUK, TAGIHAN, TRANSAKSI } from './lib/data';
+import { Masuk } from './screens/Masuk';
+import { sesi } from './lib/auth';
 
 const JUDUL: Record<string, [string, string?]> = {
   beranda: ['Beranda', 'Ringkasan keuangan hari ini'],
@@ -26,6 +28,9 @@ const JUDUL: Record<string, [string, string?]> = {
 };
 
 export default function App() {
+  // Aplikasi keuangan tanpa gerbang masuk akan menampilkan angka contoh
+  // yang tidak bisa dibedakan dari angka nyata. Ditahan di depan pintu.
+  const [masuk, setMasuk] = useState(() => sesi() !== null);
   const [view, setView] = useState('beranda');
   const [judul, sub] = JUDUL[view] ?? JUDUL.beranda!;
 
@@ -35,6 +40,10 @@ export default function App() {
     piutang: TAGIHAN.filter((t) => t.jenis === 'PIUTANG' && t.status === 'JATUH_TEMPO').length,
     persetujuan: TRANSAKSI.filter((t) => t.status === 'DIAJUKAN').length,
   };
+
+  if (!masuk) {
+    return <Masuk onMasuk={() => { setMasuk(true); window.location.reload(); }} />;
+  }
 
   return (
     <Shell

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Baris, Card, Pill, Stat, Uang } from '../components/ui';
 import { TRANSAKSI, labaRugi, persen, posisiKas, rupiah } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilLabaRugi, ambilPosisiKas, ambilTransaksi } from '../lib/api';
 
 /**
  * Tiga laporan yang benar-benar dipakai pemilik warung: berapa untungnya,
@@ -9,10 +11,11 @@ import { TRANSAKSI, labaRugi, persen, posisiKas, rupiah } from '../lib/data';
  */
 export function Laporan() {
   const [tab, setTab] = useState<'labarugi' | 'aruskas' | 'outlet'>('labarugi');
-  const lr = labaRugi();
-  const kas = posisiKas();
+  const { data: lr, nyata } = useServer(ambilLabaRugi, labaRugi(), 60_000);
+  const { data: kas } = useServer(ambilPosisiKas, posisiKas(), 60_000);
 
-  const dibukukan = TRANSAKSI.filter((t) => t.status === 'DIBUKUKAN');
+  const { data: transaksi } = useServer(ambilTransaksi, TRANSAKSI, 60_000);
+  const dibukukan = transaksi.filter((t) => t.status === 'DIBUKUKAN');
   const masuk = dibukukan.filter((t) => t.arah === 'MASUK');
   const keluar = dibukukan.filter((t) => t.arah === 'KELUAR');
 
@@ -29,6 +32,12 @@ export function Laporan() {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          untuk keputusan pembayaran atau pelaporan pajak.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Pendapatan" value={rupiah(lr.totalPendapatan, true)} />
         <Stat label="Laba kotor" value={rupiah(lr.labaKotor, true)} note={`margin ${persen(lr.marginKotor)}`} />

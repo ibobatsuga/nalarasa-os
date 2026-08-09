@@ -27,7 +27,11 @@ export const ROLES: readonly RoleDef[] = [
   { code: 'R11', name: 'Pricing / Credit Reviewer', maxBand: 'T2', grants: ['discount.approve', 'so.read', 'party.read'] },
   { code: 'R12', name: 'Digital Commerce / POS Operator', maxBand: 'T0', grants: ['pos.session.open', 'pos.session.close', 'pos.order.create', 'so.read', 'product.read', 'reservation.read', 'reservation.write', 'event.read'] },
   { code: 'R13', name: 'Customer Service Agent', maxBand: 'T0', grants: ['so.read', 'party.read', 'reservation.read', 'reservation.write', 'event.read'] },
-  { code: 'R14', name: 'Service Manager', maxBand: 'T2', grants: ['so.read', 'so.cancel', 'invoice.creditnote.approve', 'pos.session.variance.approve', 'reservation.read', 'reservation.write', 'event.read', 'event.write', 'kpi.read'] },
+  { code: 'R14', name: 'Service Manager', maxBand: 'T2', grants: ['so.read', 'so.cancel', 'invoice.creditnote.approve', 'pos.session.variance.approve', 'reservation.read', 'reservation.write', 'event.read', 'event.write', 'kpi.read',
+    // Mesin kasir dipasang dengan kredensial supervisor outlet; token perangkat
+    // itulah yang mengautentikasi ke server. Siapa yang MELAYANI tiap transaksi
+    // tetap datang dari cashierRef hasil masuk-PIN, bukan dari token ini.
+    'pos.session.open', 'pos.session.close', 'pos.order.create', 'product.read'] },
 
   // supply
   { code: 'R15', name: 'Business Requester', maxBand: 'T0', grants: ['req.create', 'po.read', 'product.read'] },
@@ -50,12 +54,12 @@ export const ROLES: readonly RoleDef[] = [
   // finance
   { code: 'R29', name: 'Billing / AR Accountant', maxBand: 'T0', grants: ['invoice.create', 'invoice.post', 'so.bill', 'so.read'] },
   { code: 'R30', name: 'Collections Officer', maxBand: 'T0', grants: ['so.settle', 'so.read', 'party.read'] },
-  { code: 'R31', name: 'AP Accountant', maxBand: 'T0', grants: ['bill.create', 'bill.match', 'po.read', 'payment.prepare'] },
-  { code: 'R32', name: 'General Accountant', maxBand: 'T0', grants: ['journal.prepare', 'account.read', 'bank.reconcile'] },
-  { code: 'R33', name: 'Controller', maxBand: 'T3', grants: ['journal.approve', 'journal.post', 'journal.reverse', 'period.close', 'bill.approve', 'account.read', 'kpi.certify', 'kpi.read', 'invoice.creditnote.approve', 'pos.gateway.reconcile', 'pos.session.variance.approve'] },
+  { code: 'R31', name: 'AP Accountant', maxBand: 'T0', grants: ['bill.create', 'bill.match', 'po.read', 'payment.prepare', 'journal.read', 'account.read'] },
+  { code: 'R32', name: 'General Accountant', maxBand: 'T0', grants: ['journal.prepare', 'account.read', 'bank.reconcile', 'journal.read'] },
+  { code: 'R33', name: 'Controller', maxBand: 'T3', grants: ['journal.approve', 'journal.post', 'journal.reverse', 'journal.read', 'period.close', 'bill.approve', 'account.read', 'kpi.certify', 'kpi.read', 'invoice.creditnote.approve', 'pos.gateway.reconcile', 'pos.session.variance.approve'] },
   { code: 'R34', name: 'Treasury Preparer', maxBand: 'T0', grants: ['payment.prepare', 'party.bank.change', 'bank.reconcile'] },
   { code: 'R35', name: 'Treasury Approver', maxBand: 'T3', grants: ['payment.approve', 'payment.release', 'party.bank.verify', 'party.bank.approve'] },
-  { code: 'R36', name: 'CFO / Finance Director', maxBand: 'T4', grants: ['payment.approve', 'period.reopen', 'period.close', 'payroll.approve', 'party.bank.approve', 'journal.approve', 'bill.approve', 'compensation.approve', 'kpi.read', 'kpi.certify', 'audit.read'] },
+  { code: 'R36', name: 'CFO / Finance Director', maxBand: 'T4', grants: ['payment.approve', 'period.reopen', 'period.close', 'payroll.approve', 'party.bank.approve', 'journal.approve', 'journal.read', 'account.read', 'bill.approve', 'compensation.approve', 'kpi.read', 'kpi.certify', 'audit.read'] },
 
   // people
   { code: 'R37', name: 'Employee Self-Service', maxBand: 'T0', grants: [] },

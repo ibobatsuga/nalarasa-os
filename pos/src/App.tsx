@@ -7,6 +7,7 @@ import { CloseShift } from './screens/CloseShift';
 import { FALLBACK_MENU } from './data/menu';
 import { bootstrap, startSync } from './lib/sync';
 import { store, type CatalogItem } from './lib/store';
+import { Pasang } from './screens/Pasang';
 
 type Screen = 'login' | 'open' | 'register' | 'orders' | 'close';
 
@@ -17,6 +18,13 @@ const firstScreen = (): Screen => {
 };
 
 export default function App() {
+  // Token perangkat, bukan PIN. Tanpa ini setiap sinkronisasi ditolak 401 dan
+  // penjualan menumpuk di antrean lokal tanpa penjelasan.
+  const [terpasang, setTerpasang] = useState(() => {
+    const t = localStorage.getItem('pos.token');
+    const exp = localStorage.getItem('pos.tokenExp');
+    return Boolean(t) && (!exp || new Date(exp) > new Date());
+  });
   const [screen, setScreen] = useState<Screen>(firstScreen);
   const [tenantId, setTenantId] = useState(() => localStorage.getItem('pos.tenantId') ?? '');
   const [catalog, setCatalog] = useState<CatalogItem[]>(() => {
@@ -43,6 +51,9 @@ export default function App() {
     return () => clearInterval(t);
   }, [screen]);
 
+  if (!terpasang) {
+    return <Pasang onTerpasang={() => { setTerpasang(true); window.location.reload(); }} />;
+  }
   if (screen === 'login') {
     return <Login onSignedIn={() => setScreen(firstScreen())} />;
   }

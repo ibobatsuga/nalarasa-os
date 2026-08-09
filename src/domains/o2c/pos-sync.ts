@@ -265,7 +265,7 @@ export async function tillBootstrap(actor: Actor, siteCode: string) {
   return {
     // The till needs the tenant id to reproduce the PIN digest offline.
     tenantId: currentTenantId(),
-    site: { id: site.id, code: site.code, name: site.name },
+    site: { id: site.id, code: site.code, name: site.name, companyId: site.companyId },
     // Menu yang dimatikan dapur tetap dikirim, tapi ditandai — kasir perlu bisa
     // menjawab "kenapa tidak ada", bukan sekadar melihatnya hilang.
     catalog: products.map((p) => ({

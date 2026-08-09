@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Card, Stat, Tabel, Uang, type Kolom } from '../components/ui';
-import { akunNama, bukuBesar, jurnal, rupiah, tanggal, type BarisJurnal, type SaldoAkun } from '../lib/data';
+import { TRANSAKSI, akunNama, bukuBesar, jurnal, rupiah, tanggal, type BarisJurnal, type SaldoAkun } from '../lib/data';
+import { useServer } from '../lib/useServer';
+import { ambilBukuBesar, ambilTransaksi } from '../lib/api';
 
 /**
  * Jurnal diturunkan dari transaksi, tidak disimpan terpisah. Konsekuensinya
@@ -9,8 +11,11 @@ import { akunNama, bukuBesar, jurnal, rupiah, tanggal, type BarisJurnal, type Sa
  */
 export function Buku() {
   const [tab, setTab] = useState<'jurnal' | 'besar' | 'neraca'>('jurnal');
-  const baris = jurnal();
-  const bb = bukuBesar();
+  // Jurnal disusun dari transaksi server; saldo per akun datang dari GL langsung
+  // supaya neraca saldo tidak pernah berbeda dari yang dilihat controller.
+  const { data: trx } = useServer(ambilTransaksi, TRANSAKSI, 60_000);
+  const { data: bb, nyata } = useServer(ambilBukuBesar, bukuBesar(), 60_000);
+  const baris = jurnal(trx);
 
   const totalDebit = baris.reduce((s, b) => s + b.debit, 0);
   const totalKredit = baris.reduce((s, b) => s + b.kredit, 0);
@@ -47,6 +52,12 @@ export function Buku() {
 
   return (
     <>
+      {!nyata && (
+        <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-ink-600">
+          Server belum terhubung — angka di bawah adalah data contoh. Jangan dipakai
+          untuk keputusan pembayaran atau pelaporan pajak.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Baris jurnal" value={String(baris.length)} note="dari transaksi dibukukan" />
         <Stat label="Total debit" value={rupiah(totalDebit, true)} />

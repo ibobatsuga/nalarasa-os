@@ -15,9 +15,9 @@ declare module 'fastify' {
   }
 }
 
-const PUBLIC_PREFIXES = ['/health', '/meta', '/auth/login'];
+const PUBLIC_PREFIXES = ['/health', '/meta', '/auth/login', '/api/health', '/api/meta', '/api/auth/login'];
 /** Paths that legitimately run without a tenant: health and platform admin. */
-const TENANTLESS_PREFIXES = ['/health', '/meta', '/platform'];
+const TENANTLESS_PREFIXES = ['/health', '/meta', '/platform', '/api/health', '/api/meta', '/api/platform'];
 
 /**
  * Tenant comes from the subdomain (warungbudi.erp.id) or an explicit header in
